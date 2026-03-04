@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Table,
@@ -43,6 +43,17 @@ interface UserWithStatus extends User {
   is_active?: boolean;
 }
 
+type SortField =
+  | 'username'
+  | 'display_name'
+  | 'is_active'
+  | 'is_admin'
+  | 'trust_level'
+  | 'created_at'
+  | 'last_login';
+
+type SortOrder = 'ascend' | 'descend' | null;
+
 export default function UserManagement() {
   const navigate = useNavigate();
   const [users, setUsers] = useState<UserWithStatus[]>([]);
@@ -55,6 +66,8 @@ export default function UserManagement() {
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchText, setSearchText] = useState('');
+  const [sortField, setSortField] = useState<SortField | null>('created_at');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('descend');
 
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -70,6 +83,61 @@ export default function UserManagement() {
       user.user_id?.toLowerCase().includes(searchLower)
     );
   });
+
+  // 排序后的用户列表
+  const sortedUsers = useMemo(() => {
+    if (!sortField || !sortOrder) {
+      return filteredUsers;
+    }
+
+    const compareValues = (
+      a: string | number | boolean | null | undefined,
+      b: string | number | boolean | null | undefined
+    ) => {
+      // 空值始终置底
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+
+      if (typeof a === 'string' && typeof b === 'string') {
+        return a.localeCompare(b, 'zh-CN');
+      }
+
+      if (typeof a === 'boolean' && typeof b === 'boolean') {
+        return Number(a) - Number(b);
+      }
+
+      return Number(a) - Number(b);
+    };
+
+    const getSortValue = (user: UserWithStatus) => {
+      switch (sortField) {
+        case 'username':
+          return user.username ?? null;
+        case 'display_name':
+          return user.display_name ?? null;
+        case 'is_active':
+          return user.is_active !== false;
+        case 'is_admin':
+          return user.is_admin;
+        case 'trust_level':
+          return user.trust_level ?? null;
+        case 'created_at':
+          return user.created_at ? new Date(user.created_at).getTime() : null;
+        case 'last_login':
+          return user.last_login ? new Date(user.last_login).getTime() : null;
+        default:
+          return null;
+      }
+    };
+
+    const sorted = [...filteredUsers].sort((a, b) => {
+      const result = compareValues(getSortValue(a), getSortValue(b));
+      return sortOrder === 'ascend' ? result : -result;
+    });
+
+    return sorted;
+  }, [filteredUsers, sortField, sortOrder]);
 
   // 加载用户列表
   const loadUsers = async () => {
@@ -240,6 +308,8 @@ export default function UserManagement() {
       dataIndex: 'username',
       key: 'username',
       width: 150,
+      sorter: true,
+      sortOrder: sortField === 'username' ? sortOrder : null,
       render: (text: string) => (
         <Space>
           <UserOutlined style={{ color: 'var(--color-primary)' }} />
@@ -252,12 +322,16 @@ export default function UserManagement() {
       dataIndex: 'display_name',
       key: 'display_name',
       width: 150,
+      sorter: true,
+      sortOrder: sortField === 'display_name' ? sortOrder : null,
     },
     {
       title: '状态',
       dataIndex: 'is_active',
       key: 'is_active',
       width: 100,
+      sorter: true,
+      sortOrder: sortField === 'is_active' ? sortOrder : null,
       render: (isActive: boolean) => (
         <Badge
           status={isActive !== false ? 'success' : 'error'}
@@ -270,6 +344,8 @@ export default function UserManagement() {
       dataIndex: 'is_admin',
       key: 'is_admin',
       width: 100,
+      sorter: true,
+      sortOrder: sortField === 'is_admin' ? sortOrder : null,
       render: (isAdmin: boolean) => (
         <Tag color={isAdmin ? 'gold' : 'blue'}>
           {isAdmin ? '👑 管理员' : '普通用户'}
@@ -281,6 +357,8 @@ export default function UserManagement() {
       dataIndex: 'trust_level',
       key: 'trust_level',
       width: 100,
+      sorter: true,
+      sortOrder: sortField === 'trust_level' ? sortOrder : null,
       render: (level: number) => (
         <Tag color={level === -1 ? 'default' : level >= 5 ? 'green' : 'blue'}>
           {level === -1 ? '已禁用' : `Level ${level}`}
@@ -292,6 +370,8 @@ export default function UserManagement() {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 180,
+      sorter: true,
+      sortOrder: sortField === 'created_at' ? sortOrder : null,
       render: (date: string) => date ? new Date(date).toLocaleString('zh-CN') : '-',
     },
     {
@@ -299,6 +379,8 @@ export default function UserManagement() {
       dataIndex: 'last_login',
       key: 'last_login',
       width: 180,
+      sorter: true,
+      sortOrder: sortField === 'last_login' ? sortOrder : null,
       render: (date: string) => date ? new Date(date).toLocaleString('zh-CN') : '从未登录',
     },
     {
@@ -568,7 +650,7 @@ export default function UserManagement() {
           }}>
             <Table
               columns={columns}
-              dataSource={filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize)}
+              dataSource={sortedUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize)}
               rowKey="user_id"
               loading={loading}
               scroll={{
@@ -576,6 +658,18 @@ export default function UserManagement() {
                 y: 'calc(100vh - 410px)'
               }}
               pagination={false}
+              onChange={(_pagination, _filters, sorter) => {
+                const currentSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+                setCurrentPage(1);
+
+                if (currentSorter && currentSorter.field && currentSorter.order) {
+                  setSortField(currentSorter.field as SortField);
+                  setSortOrder(currentSorter.order as SortOrder);
+                } else {
+                  setSortField(null);
+                  setSortOrder(null);
+                }
+              }}
             />
           </div>
 

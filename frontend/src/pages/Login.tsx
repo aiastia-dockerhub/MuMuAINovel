@@ -16,6 +16,7 @@ export default function Login() {
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
   const [form] = Form.useForm();
   const [showAnnouncement, setShowAnnouncement] = useState(false);
+  const [activeLoginMethod, setActiveLoginMethod] = useState<'local' | 'linuxdo'>('local');
 
   // 检查是否已登录和获取认证配置
   useEffect(() => {
@@ -215,6 +216,12 @@ export default function Login() {
     localStorage.setItem('announcement_hide_forever', 'true');
   };
 
+  const currentLoginMethod = localAuthEnabled && linuxdoEnabled
+    ? activeLoginMethod
+    : localAuthEnabled
+      ? 'local'
+      : 'linuxdo';
+
   return (
     <>
       <AnnouncementModal
@@ -319,7 +326,8 @@ export default function Login() {
             {/* 登录方式 */}
             {localAuthEnabled && linuxdoEnabled ? (
               <Tabs
-                defaultActiveKey="local"
+                activeKey={activeLoginMethod}
+                onChange={(key) => setActiveLoginMethod(key as 'local' | 'linuxdo')}
                 centered
                 items={[
                   {
@@ -353,9 +361,19 @@ export default function Login() {
                 marginBottom: 0,
                 lineHeight: 1.6,
               }}>
-                🎉 首次登录将自动创建账号
-                <br />
-                🔒 每个用户拥有独立的数据空间
+                {currentLoginMethod === 'linuxdo' ? (
+                  <>
+                    🎉 首次登录将自动创建账号
+                    <br />
+                    🔒 每个用户拥有独立的数据空间
+                  </>
+                ) : (
+                  <>
+                    🧪 默认账号：admin / admin123
+                    <br />
+                    🔒 每个用户拥有独立的数据空间
+                  </>
+                )}
               </Paragraph>
             </div>
           </Space>
