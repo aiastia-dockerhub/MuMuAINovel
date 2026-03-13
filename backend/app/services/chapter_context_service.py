@@ -289,7 +289,8 @@ class OneToManyContextBuilder:
         if chapter.expansion_plan:
             try:
                 plan = json.loads(chapter.expansion_plan)
-                outline_content = f"""剧情摘要：{plan.get('plot_summary', '无')}
+                # expansion_plan没有plot_summary这个键，
+                outline_content = f"""剧情摘要：{plan.get('plot_summary') or chapter.summary or '无'}
 
 关键事件：
 {chr(10).join(f'- {event}' for event in plan.get('key_events', []))}
