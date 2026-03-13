@@ -1740,7 +1740,7 @@ async def generate_outline_stream(
     
     # 获取用户ID
     user_id = getattr(request.state, "user_id", "system")
-    
+    data["user_id"] = user_id
     # 根据模式选择生成器
     if mode == "new":
         return create_sse_response(new_outline_generator(data, db, user_ai_service))
