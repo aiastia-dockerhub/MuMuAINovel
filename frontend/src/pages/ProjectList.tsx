@@ -412,6 +412,11 @@ export default function ProjectList() {
           icon: <SettingOutlined />,
           label: 'API 设置',
         },
+        {
+          key: 'mumu-api',
+          icon: <ApiOutlined />,
+          label: 'MuMuのAPI',
+        },
       ],
     },
   ];
@@ -441,6 +446,11 @@ export default function ProjectList() {
       key: 'settings',
       icon: <SettingOutlined />,
       label: 'API 设置',
+    },
+    {
+      key: 'mumu-api',
+      icon: <ApiOutlined />,
+      label: 'MuMuのAPI',
     },
   ];
 
@@ -550,6 +560,10 @@ export default function ProjectList() {
               selectedKeys={[activeView]}
               style={{ borderRight: 0, paddingTop: 12, width: '100%' }}
               onClick={({ key }) => {
+                if (key === 'mumu-api') {
+                  window.open('https://api.mumuverse.space', '_blank', 'noopener,noreferrer');
+                  return;
+                }
                 changeView(key as ProjectListView);
               }}
               items={collapsed ? sideMenuItemsCollapsed : sideMenuItems}
@@ -751,6 +765,11 @@ export default function ProjectList() {
               selectedKeys={[activeView]}
               style={{ borderRight: 0, paddingTop: 8 }}
               onClick={({ key }) => {
+                if (key === 'mumu-api') {
+                  window.open('https://api.mumuverse.space', '_blank', 'noopener,noreferrer');
+                  setDrawerVisible(false);
+                  return;
+                }
                 changeView(key as ProjectListView);
                 setDrawerVisible(false);
               }}

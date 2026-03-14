@@ -280,12 +280,29 @@ export default function SettingsPage() {
     { value: 'openai', label: 'OpenAI Compatible', defaultUrl: 'https://api.openai.com/v1' },
     // { value: 'anthropic', label: 'Anthropic (Claude)', defaultUrl: 'https://api.anthropic.com' },
     { value: 'gemini', label: 'Google Gemini', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+    {
+      value: 'mumu',
+      label: 'MuMuのAPI',
+      defaultUrl: 'https://api.mumuverse.space/v1',
+      defaultModel: 'gemini-3-flash-preview'
+    },
   ];
+
+  const selectedProvider = Form.useWatch('api_provider', form);
+  const selectedPresetProvider = Form.useWatch('api_provider', presetForm);
 
   const handleProviderChange = (value: string) => {
     const provider = apiProviders.find(p => p.value === value);
-    if (provider && provider.defaultUrl) {
-      form.setFieldValue('api_base_url', provider.defaultUrl);
+    if (provider) {
+      const nextValues: Record<string, string> = {};
+      if (provider.defaultUrl) {
+        nextValues.api_base_url = provider.defaultUrl;
+      }
+      if (provider.value === 'mumu') {
+        nextValues.api_key = '';
+        nextValues.llm_model = provider.defaultModel || 'gemini-3-flash-preview';
+      }
+      form.setFieldsValue(nextValues);
     }
     // 清空模型列表，需要重新获取
     setModelOptions([]);
@@ -488,8 +505,16 @@ export default function SettingsPage() {
   // 预设编辑窗口：提供商变更时更新默认URL并清空模型列表
   const handlePresetProviderChange = (value: string) => {
     const provider = apiProviders.find(p => p.value === value);
-    if (provider && provider.defaultUrl) {
-      presetForm.setFieldValue('api_base_url', provider.defaultUrl);
+    if (provider) {
+      const nextValues: Record<string, string> = {};
+      if (provider.defaultUrl) {
+        nextValues.api_base_url = provider.defaultUrl;
+      }
+      if (provider.value === 'mumu') {
+        nextValues.api_key = '';
+        nextValues.llm_model = provider.defaultModel || 'gemini-3-flash-preview';
+      }
+      presetForm.setFieldsValue(nextValues);
     }
     // 清空模型列表，需要重新获取
     setPresetModelOptions([]);
@@ -780,6 +805,8 @@ export default function SettingsPage() {
       //   return 'purple';
       case 'gemini':
         return 'green';
+      case 'mumu':
+        return 'magenta';
       default:
         return 'default';
     }
@@ -1049,6 +1076,30 @@ export default function SettingsPage() {
                               ))}
                             </Select>
                           </Form.Item>
+
+                          {selectedProvider === 'mumu' && (
+                            <Alert
+                              type="info"
+                              showIcon
+                              message="MuMuのAPI 专属供应商"
+                              description={
+                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                  <Text>
+                                    已自动填入专属地址，API Key 保持留空。免费注册后即可获取可用 Key。
+                                  </Text>
+                                  <div>
+                                    <Button
+                                      type="primary"
+                                      onClick={() => window.open('https://api.mumuverse.space', '_blank', 'noopener,noreferrer')}
+                                    >
+                                      打开 MuMuのAPI 站点免费注册
+                                    </Button>
+                                  </div>
+                                </Space>
+                              }
+                              style={{ marginBottom: 16 }}
+                            />
+                          )}
 
                           <Form.Item
                             label={
@@ -1568,8 +1619,33 @@ export default function SettingsPage() {
                   <Select placeholder="选择提供商" onChange={handlePresetProviderChange}>
                     <Select.Option value="openai">OpenAI</Select.Option>
                     <Select.Option value="gemini">Google Gemini</Select.Option>
+                    <Select.Option value="mumu">MuMuのAPI</Select.Option>
                   </Select>
                 </Form.Item>
+
+                {selectedPresetProvider === 'mumu' && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="MuMuのAPI 专属供应商"
+                    description={
+                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        <Text>
+                          已自动填入专属地址，API Key 保持留空。免费注册后即可获取可用 Key。
+                        </Text>
+                        <div>
+                          <Button
+                            type="primary"
+                            onClick={() => window.open('https://api.mumuverse.space', '_blank', 'noopener,noreferrer')}
+                          >
+                            打开 MuMuのAPI 站点免费注册
+                          </Button>
+                        </div>
+                      </Space>
+                    }
+                    style={{ marginBottom: 16 }}
+                  />
+                )}
               </Col>
             </Row>
 
