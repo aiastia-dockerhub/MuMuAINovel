@@ -744,12 +744,26 @@ export interface StoryMemory {
   is_foreshadow: 0 | 1 | 2; // 0=普通, 1=已埋下, 2=已回收
 }
 
+export interface EntityChangesSummaryItem {
+  updated_count?: number;
+  state_updated_count?: number;
+  relationship_created_count?: number;
+  relationship_updated_count?: number;
+  org_updated_count?: number;
+  changes: string[];
+}
+
 // 章节分析结果响应 - 匹配后端API返回
 export interface ChapterAnalysisResponse {
   chapter_id: string;
   analysis: AnalysisData;  // 注意：后端返回的是analysis而不是analysis_data
   memories: StoryMemory[];
   created_at: string;
+  entity_changes?: {
+    careers: EntityChangesSummaryItem;
+    character_states: EntityChangesSummaryItem;
+    organization_states: EntityChangesSummaryItem;
+  };
 }
 
 // 手动触发分析响应
