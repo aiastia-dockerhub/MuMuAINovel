@@ -71,8 +71,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: peter-evans/dockerhub-description@v5
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
           repository: ${{ env.DOCKER_IMAGE }}
           readme-filepath: ./README.md
         continue-on-error: true
