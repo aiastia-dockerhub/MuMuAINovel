@@ -38,7 +38,7 @@ class WorkshopClient:
         url = f"{self.base_url}/api/prompt-workshop{path}"
         
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, verify=False) as client:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.request(
                     method=method,
                     url=url,

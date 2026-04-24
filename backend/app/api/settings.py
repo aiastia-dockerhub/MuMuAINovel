@@ -26,6 +26,7 @@ from app.logger import get_logger
 from app.config import settings as app_settings, PROJECT_ROOT
 from app.services.ai_service import AIService, create_user_ai_service, create_user_ai_service_with_mcp, normalize_provider
 from app.services.email_service import email_service
+from app.security import validate_public_http_url
 
 logger = get_logger(__name__)
 
@@ -452,7 +453,8 @@ async def delete_settings(
 async def get_available_models(
     api_key: str,
     api_base_url: str,
-    provider: str = "openai"
+    provider: str = "openai",
+    user: User = Depends(require_login)
 ):
     """
     从配置的 API 获取可用的模型列表
@@ -467,6 +469,7 @@ async def get_available_models(
     """
     try:
         provider = normalize_provider(provider)
+        api_base_url = validate_public_http_url(api_base_url)
         async with httpx.AsyncClient(timeout=10.0) as client:
             if provider == "openai" or provider == "azure" or provider == "custom":
                 # OpenAI 兼容接口获取模型列表

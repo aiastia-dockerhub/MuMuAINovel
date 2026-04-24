@@ -1,5 +1,5 @@
 """FastAPI应用主入口"""
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -106,7 +106,7 @@ async def health_check():
 
 
 @app.get("/health/db-sessions")
-async def db_session_stats():
+async def db_session_stats(request: Request):
     """
     数据库会话统计（监控连接泄漏）
     
@@ -118,6 +118,8 @@ async def db_session_stats():
     - generator_exits: SSE断开次数
     - last_check: 最后检查时间
     """
+    if not getattr(request.state, "is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     return {
         "status": "ok",
         "session_stats": _session_stats,
@@ -176,8 +178,18 @@ if static_dir.exists():
             )
         
         file_path = static_dir / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
+        try:
+            resolved_file = file_path.resolve()
+            resolved_static = static_dir.resolve()
+            resolved_file.relative_to(resolved_static)
+        except ValueError:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "页面不存在"}
+            )
+
+        if resolved_file.is_file():
+            return FileResponse(resolved_file)
         
         index_file = static_dir / "index.html"
         if index_file.exists():
