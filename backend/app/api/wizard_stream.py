@@ -1280,6 +1280,11 @@ async def outline_generator(
         if not project:
             yield await tracker.error("项目不存在或无权访问", 404)
             return
+
+        # 设置用户信息以启用MCP，并确保后续自动角色/组织补全使用当前请求的AI服务上下文
+        if user_id:
+            user_ai_service.user_id = user_id
+            user_ai_service.db_session = db
         
         # 获取角色信息
         yield await tracker.loading("加载角色信息...", 0.8)
