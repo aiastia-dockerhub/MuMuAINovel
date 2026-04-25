@@ -171,47 +171,67 @@ export default function Careers() {
 
         try {
             const userRequirements = values.user_requirements?.trim() || '';
-            const eventSource = new EventSource(
-                `/api/careers/generate-system?` +
-                new URLSearchParams({
+
+            // 使用 fetch + POST 替代 EventSource GET，避免 URL 长度限制
+            const response = await fetch('/api/careers/generate-system', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+                body: JSON.stringify({
                     project_id: projectId || '',
-                    main_career_count: values.main_career_count.toString(),
-                    sub_career_count: values.sub_career_count.toString(),
+                    main_career_count: values.main_career_count,
+                    sub_career_count: values.sub_career_count,
                     user_requirements: userRequirements,
-                    enable_mcp: 'false'
-                }).toString(),
-                { withCredentials: true }
-            );
+                    enable_mcp: false
+                })
+            });
 
-            eventSource.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-
-                    if (data.type === 'progress') {
-                        setAiProgress(data.progress || 0);
-                        setAiMessage(data.message || '');
-                    } else if (data.type === 'done') {
-                        eventSource.close();
-                        setTimeout(() => {
-                            setAiGenerating(false);
-                            message.success('AI新职业生成完成！');
-                            fetchCareers();
-                        }, 1000);
-                    } else if (data.type === 'error') {
-                        eventSource.close();
-                        setAiGenerating(false);
-                        message.error(data.message || '生成失败');
-                    }
-                } catch (e) {
-                    console.error('解析SSE数据失败:', e);
-                }
-            };
-
-            eventSource.onerror = () => {
-                eventSource.close();
+            if (!response.ok || !response.body) {
                 setAiGenerating(false);
-                message.error('连接中断，生成失败');
-            };
+                message.error(`请求失败: ${response.status}`);
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+
+                            if (data.type === 'progress') {
+                                setAiProgress(data.progress || 0);
+                                setAiMessage(data.message || '');
+                            } else if (data.type === 'done') {
+                                setTimeout(() => {
+                                    setAiGenerating(false);
+                                    message.success('AI新职业生成完成！');
+                                    fetchCareers();
+                                }, 1000);
+                            } else if (data.type === 'error') {
+                                setAiGenerating(false);
+                                message.error(data.error || data.message || '生成失败');
+                            }
+                        } catch (e) {
+                            // 忽略非JSON行（如心跳注释）
+                        }
+                    }
+                }
+            }
+
+            setAiGenerating(false);
         } catch (err: unknown) {
             setAiGenerating(false);
             const error = err as Error;

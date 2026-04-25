@@ -156,14 +156,10 @@ async def create_career(
         raise HTTPException(status_code=500, detail=f"创建职业失败: {str(e)}")
 
 
-@router.get("/generate-system", summary="AI生成新职业（增量式，流式）")
+@router.post("/generate-system", summary="AI生成新职业（增量式，流式）")
 async def generate_career_system(
-    project_id: str,
-    main_career_count: int = 3,
-    sub_career_count: int = 6,
-    user_requirements: str = "",
-    enable_mcp: bool = False,
-    http_request: Request = None,
+    request_data: CareerGenerateRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     user_ai_service: AIService = Depends(get_user_ai_service)
 ):
@@ -177,6 +173,10 @@ async def generate_career_system(
         try:
             # 验证用户权限和项目是否存在
             user_id = getattr(http_request.state, 'user_id', None)
+            project_id = request_data.project_id
+            main_career_count = request_data.main_career_count
+            sub_career_count = request_data.sub_career_count
+            user_requirements = request_data.user_requirements
             project = await verify_project_access(project_id, user_id, db)
             
             yield await tracker.start()
