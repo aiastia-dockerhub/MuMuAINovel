@@ -60,10 +60,14 @@ RUN apt-get update && apt-get install -y \
 # 复制后端依赖文件
 COPY backend/requirements.txt ./
 
-# 安装 Python 依赖（包含 torch，避免单独安装造成重复层）
+# 安装 Python 依赖
+# 先安装 torch CPU版本（~200MB vs 完整版~2GB，节省90%下载时间）
+# 对于embedding场景，CPU版本完全够用
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+        pip install --no-cache-dir torch==2.8.0 --index-url https://mirrors.aliyun.com/pypi/simple/ --extra-index-url https://download.pytorch.org/whl/cpu && \
         pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/; \
     else \
+        pip install --no-cache-dir torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu && \
         pip install --no-cache-dir -r requirements.txt; \
     fi
 
