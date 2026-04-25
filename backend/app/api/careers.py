@@ -7,7 +7,7 @@ import json
 from typing import AsyncGenerator
 
 from app.database import get_db
-from app.utils.sse_response import SSEResponse, create_sse_response, WizardProgressTracker
+from app.utils.sse_response import SSEResponse, create_sse_response, WizardProgressTracker, wrap_stream_with_heartbeat, HEARTBEAT
 from app.models.career import Career, CharacterCareer
 from app.models.character import Character
 from app.models.project import Project
@@ -317,7 +317,15 @@ async def generate_career_system(
                 chunk_count = 0
                 estimated_total = max(3000, len(prompt) * 8)
                 
-                async for chunk in user_ai_service.generate_text_stream(prompt=prompt):
+                async for chunk in wrap_stream_with_heartbeat(
+                    user_ai_service.generate_text_stream(prompt=prompt),
+                    heartbeat_interval=15.0
+                ):
+                    # 心跳哨兵：发送心跳保活，不混入AI响应
+                    if chunk is HEARTBEAT:
+                        yield await tracker.heartbeat()
+                        continue
+
                     chunk_count += 1
                     ai_response += chunk
                     

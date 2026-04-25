@@ -7,7 +7,7 @@ import json
 from typing import AsyncGenerator
 
 from app.database import get_db
-from app.utils.sse_response import SSEResponse, create_sse_response, WizardProgressTracker
+from app.utils.sse_response import SSEResponse, create_sse_response, WizardProgressTracker, wrap_stream_with_heartbeat, HEARTBEAT
 from app.models.character import Character
 from app.models.project import Project
 from app.models.generation_history import GenerationHistory
@@ -948,10 +948,18 @@ async def generate_character_stream(
                 logger.info(f"🎯 开始生成角色（流式模式）...")
                 yield await tracker.generating(0, estimated_total, "开始生成角色...")
                 
-                async for chunk in user_ai_service.generate_text_stream(
-                    prompt=prompt,
-                    tool_choice="required",
+                async for chunk in wrap_stream_with_heartbeat(
+                    user_ai_service.generate_text_stream(
+                        prompt=prompt,
+                        tool_choice="required",
+                    ),
+                    heartbeat_interval=15.0
                 ):
+                    # 心跳哨兵：发送心跳保活，不混入AI响应
+                    if chunk is HEARTBEAT:
+                        yield await tracker.heartbeat()
+                        continue
+
                     # chunk 现在可能是 dict 或 str，提取 content 字段
                     if isinstance(chunk, dict):
                         content = chunk.get("content", "")
