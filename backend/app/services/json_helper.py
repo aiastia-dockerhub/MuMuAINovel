@@ -13,6 +13,89 @@ except ImportError:
 logger = get_logger(__name__)
 
 
+def _fix_bare_newlines_in_json(text: str) -> str:
+    """
+    修复JSON字符串值中的裸换行符。
+    AI生成的JSON常在字符串值中插入未转义的换行符（标准JSON要求用\\n转义）。
+    此函数遍历文本，找到引号内的字符串值，将其中的裸换行符替换为\\n。
+    对所有模板都生效，老用户无需修改任何提示词。
+    """
+    if not text or '"' not in text:
+        return text
+    
+    result = []
+    i = 0
+    in_string = False
+    fixed_count = 0
+    
+    while i < len(text):
+        c = text[i]
+        
+        if c == '"' and not in_string:
+            # 进入字符串
+            in_string = True
+            result.append(c)
+            i += 1
+            continue
+        
+        if in_string:
+            if c == '\\':
+                # 转义字符，跳过下一个字符
+                result.append(c)
+                if i + 1 < len(text):
+                    i += 1
+                    result.append(text[i])
+                i += 1
+                continue
+            
+            if c == '"':
+                # 字符串结束
+                in_string = False
+                result.append(c)
+                i += 1
+                continue
+            
+            if c == '\n':
+                # 裸换行符 → 替换为转义换行
+                result.append('\\')
+                result.append('n')
+                fixed_count += 1
+                i += 1
+                continue
+            
+            if c == '\r':
+                # 裸回车符 → 忽略或替换
+                if i + 1 < len(text) and text[i + 1] == '\n':
+                    # \r\n → \\n
+                    result.append('\\')
+                    result.append('n')
+                    fixed_count += 1
+                    i += 2
+                else:
+                    result.append('\\')
+                    result.append('n')
+                    fixed_count += 1
+                    i += 1
+                continue
+            
+            if c == '\t':
+                # 裸制表符 → 替换为转义制表符
+                result.append('\\')
+                result.append('t')
+                fixed_count += 1
+                i += 1
+                continue
+        
+        # 非字符串内的字符，或字符串内的普通字符
+        result.append(c)
+        i += 1
+    
+    if fixed_count > 0:
+        logger.debug(f"✅ 修复了{fixed_count}个JSON字符串值中的裸控制字符（换行/制表符）")
+    
+    return ''.join(result)
+
+
 def clean_json_response(text: str) -> str:
     """清洗 AI 返回的 JSON（改进版 - 流式安全）"""
     try:
@@ -36,6 +119,10 @@ def clean_json_response(text: str) -> str:
         # 替换中文逗号（AI可能在JSON结构位置使用）
         text = text.replace('\uff0c', ',')   # ，→ ,
         text = text.replace('\uff1a', ':')   # ：→ :
+        
+        # 修复JSON字符串值中的裸换行符（AI常见输出问题）
+        # AI生成的JSON中，字符串值可能包含未转义的换行符，标准JSON要求必须用\n转义
+        text = _fix_bare_newlines_in_json(text)
         
         # 去除 markdown 代码块
         text = re.sub(r'^```json\s*\n?', '', text, flags=re.MULTILINE | re.IGNORECASE)
