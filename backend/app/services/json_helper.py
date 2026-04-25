@@ -4,6 +4,12 @@ import re
 from typing import Any, Dict, List, Union
 from app.logger import get_logger
 
+try:
+    import json5
+    HAS_JSON5 = True
+except ImportError:
+    HAS_JSON5 = False
+
 logger = get_logger(__name__)
 
 
@@ -16,6 +22,20 @@ def clean_json_response(text: str) -> str:
         
         original_length = len(text)
         logger.debug(f"🔍 开始清洗JSON，原始长度: {original_length}")
+        
+        # 替换中文引号和特殊符号（AI可能在JSON结构位置使用这些字符，导致解析失败）
+        # 替换为ASCII引号，json5会正确处理
+        text = text.replace('\u201c', '"')  # " → "
+        text = text.replace('\u201d', '"')  # " → "
+        text = text.replace('\u2018', "'")  # ' → '
+        text = text.replace('\u2019', "'")  # ' → '
+        text = text.replace('\u300e', '"')  # 『 → "
+        text = text.replace('\u300f', '"')  # 』 → "
+        text = text.replace('\u300c', '"')  # 「 → "
+        text = text.replace('\u300d', '"')  # 」 → "
+        # 替换中文逗号（AI可能在JSON结构位置使用）
+        text = text.replace('\uff0c', ',')   # ，→ ,
+        text = text.replace('\uff1a', ':')   # ：→ :
         
         # 去除 markdown 代码块
         text = re.sub(r'^```json\s*\n?', '', text, flags=re.MULTILINE | re.IGNORECASE)
@@ -148,12 +168,54 @@ def clean_json_response(text: str) -> str:
 
 
 def parse_json(text: str) -> Union[Dict, List]:
-    """解析 JSON"""
+    """解析 JSON，优先使用标准json，失败后用json5容错解析"""
+    cleaned = clean_json_response(text)
+    
+    # 优先使用标准 json
     try:
-        cleaned = clean_json_response(text)
         return json.loads(cleaned)
-    except Exception as e:
-        logger.error(f"❌ parse_json 出错: {e}")
-        logger.error(f"   原始文本长度: {len(text) if text else 0}")
-        logger.error(f"   清洗后文本长度: {len(cleaned) if cleaned else 0}")
-        raise
+    except (json.JSONDecodeError, Exception):
+        pass
+    
+    # json5 容错解析（处理单引号、多余逗号、宽松格式等）
+    if HAS_JSON5:
+        try:
+            logger.info("🔄 标准JSON解析失败，使用json5容错解析")
+            result = json5.loads(cleaned)
+            logger.info("✅ json5容错解析成功")
+            return result
+        except Exception as e5:
+            logger.error(f"❌ json5容错解析也失败: {e5}")
+    
+    # 最终失败
+    logger.error(f"❌ parse_json 完全失败")
+    logger.error(f"   原始文本长度: {len(text) if text else 0}")
+    logger.error(f"   清洗后文本长度: {len(cleaned) if cleaned else 0}")
+    logger.debug(f"   清洗后文本预览: {cleaned[:500] if cleaned else 'None'}")
+    raise json.JSONDecodeError("JSON解析失败（标准和json5均失败）", cleaned, 0)
+
+
+def loads_json(text: str) -> Any:
+    """
+    json.loads 的容错替代品，可直接替换 json.loads()。
+    优先用标准 json.loads，失败后自动降级到 json5。
+    适用于解析 AI 返回的、可能包含不规范格式的 JSON。
+    """
+    # 优先使用标准 json
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, Exception):
+        pass
+    
+    # json5 容错解析
+    if HAS_JSON5:
+        try:
+            logger.info("🔄 json.loads失败，使用json5容错解析")
+            result = json5.loads(text)
+            logger.info("✅ json5容错解析成功")
+            return result
+        except Exception as e5:
+            logger.error(f"❌ json5容错解析也失败: {e5}")
+    
+    # 最终失败，抛出标准异常
+    raise json.JSONDecodeError("JSON解析失败（标准和json5均失败）", text, 0)

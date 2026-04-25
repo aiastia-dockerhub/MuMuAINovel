@@ -35,5 +35,8 @@ transformers==4.57.1
 # Sentence Transformers（更新到最新稳定版本以修复 FutureWarning）
 sentence-transformers==5.1.2
 
+# 宽松JSON解析
+json5==0.12.0
+
 # PyTorch 版本锁定（用于打包环境）
 torch==2.8.0

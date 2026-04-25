@@ -20,6 +20,7 @@ from app.schemas.character import (
     CharacterGenerateRequest
 )
 from app.services.ai_service import AIService
+from app.services.json_helper import loads_json
 from app.services.prompt_service import prompt_service, PromptService
 from app.services.import_export_service import ImportExportService
 from app.schemas.import_export import CharactersExportRequest, CharactersImportResult
@@ -987,7 +988,7 @@ async def generate_character_stream(
             # ✅ 使用统一的 JSON 清洗方法
             try:
                 cleaned_response = user_ai_service._clean_json_response(ai_response)
-                character_data = json.loads(cleaned_response)
+                character_data = loads_json(cleaned_response)
                 logger.info(f"✅ 角色JSON解析成功")
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 角色JSON解析失败: {e}")

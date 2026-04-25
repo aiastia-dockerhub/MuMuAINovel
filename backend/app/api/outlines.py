@@ -27,6 +27,7 @@ from app.schemas.outline import (
     CreateChaptersFromPlansResponse
 )
 from app.services.ai_service import AIService
+from app.services.json_helper import loads_json
 from app.services.prompt_service import prompt_service, PromptService
 from app.services.memory_service import memory_service
 from app.services.plot_expansion_service import PlotExpansionService
@@ -850,7 +851,7 @@ def _parse_ai_response(ai_response: str, raise_on_error: bool = False) -> list:
         ai_service_temp = AIService()
         cleaned_text = ai_service_temp._clean_json_response(ai_response)
         
-        outline_data = json.loads(cleaned_text)
+        outline_data = loads_json(cleaned_text)
         
         # 确保是列表格式
         if not isinstance(outline_data, list):

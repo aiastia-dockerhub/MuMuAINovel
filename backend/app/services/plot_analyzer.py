@@ -2,6 +2,7 @@
 from typing import Dict, Any, List, Optional, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.ai_service import AIService
+from app.services.json_helper import loads_json
 from app.services.prompt_service import prompt_service, PromptService
 from app.logger import get_logger
 import json
@@ -277,7 +278,7 @@ class PlotAnalyzer:
             cleaned = self.ai_service._clean_json_response(response)
             
             # 尝试解析JSON
-            result = json.loads(cleaned)
+            result = loads_json(cleaned)
             
             # 验证必要字段
             required_fields = ['hooks', 'plot_points', 'scores']

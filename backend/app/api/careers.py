@@ -25,6 +25,7 @@ from app.schemas.career import (
     CareerStage
 )
 from app.services.ai_service import AIService
+from app.services.json_helper import loads_json
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
 from app.api.common import verify_project_access
@@ -345,7 +346,7 @@ async def generate_career_system(
             # 清洗并解析JSON
             try:
                 cleaned_response = user_ai_service._clean_json_response(ai_response)
-                career_data = json.loads(cleaned_response)
+                career_data = loads_json(cleaned_response)
                 logger.info(f"✅ 职业体系JSON解析成功")
             except json.JSONDecodeError as e:
                 logger.error(f"❌ 职业体系JSON解析失败: {e}")

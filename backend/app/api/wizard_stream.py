@@ -16,6 +16,7 @@ from app.models.relationship import CharacterRelationship, Organization, Organiz
 from app.models.writing_style import WritingStyle
 from app.models.project_default_style import ProjectDefaultStyle
 from app.services.ai_service import AIService
+from app.services.json_helper import loads_json
 from app.services.prompt_service import prompt_service, PromptService
 from app.services.plot_expansion_service import PlotExpansionService
 from app.logger import get_logger
@@ -169,7 +170,7 @@ async def world_building_generator(
                     logger.info(f"✅ JSON清洗完成，清洗后长度: {len(cleaned_text)}")
                     logger.info(f"   清洗后预览: {cleaned_text[:300]}...")
                     
-                    world_data = json.loads(cleaned_text)
+                    world_data = loads_json(cleaned_text)
                     logger.info(f"✅ 世界观JSON解析成功（尝试{world_retry_count+1}/{MAX_WORLD_RETRIES}）")
                     world_generation_success = True  # 解析成功，标记完成
                             
@@ -433,7 +434,7 @@ async def career_system_generator(
                 # 清洗并解析JSON
                 try:
                     cleaned_response = user_ai_service._clean_json_response(career_response)
-                    career_data = json.loads(cleaned_response)
+                    career_data = loads_json(cleaned_response)
                     logger.info(f"✅ 职业体系JSON解析成功（尝试{career_retry_count+1}/{MAX_CAREER_RETRIES}）")
                     
                     yield await tracker.saving("保存职业数据...")
@@ -771,7 +772,7 @@ async def characters_generator(
                     
                     # 解析批次结果 - 使用统一的JSON清洗方法
                     cleaned_text = user_ai_service._clean_json_response(accumulated_text)
-                    characters_data = json.loads(cleaned_text)
+                    characters_data = loads_json(cleaned_text)
                     if not isinstance(characters_data, list):
                         characters_data = [characters_data]
                     
@@ -1362,7 +1363,7 @@ async def outline_generator(
         
         try:
             cleaned_text = user_ai_service._clean_json_response(accumulated_text)
-            outline_data = json.loads(cleaned_text)
+            outline_data = loads_json(cleaned_text)
             if not isinstance(outline_data, list):
                 outline_data = [outline_data]
         except json.JSONDecodeError as e:
@@ -1668,7 +1669,7 @@ async def world_building_regenerate_generator(
                     cleaned_text = user_ai_service._clean_json_response(accumulated_text)
                     logger.info(f"✅ JSON清洗完成，清洗后长度: {len(cleaned_text)}")
                     
-                    world_data = json.loads(cleaned_text)
+                    world_data = loads_json(cleaned_text)
                     logger.info(f"✅ 世界观重新生成JSON解析成功（尝试{world_retry_count+1}/{MAX_WORLD_RETRIES}）")
                     world_generation_success = True
                             

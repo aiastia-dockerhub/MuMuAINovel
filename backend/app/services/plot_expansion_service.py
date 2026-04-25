@@ -9,6 +9,7 @@ from app.models.project import Project
 from app.models.character import Character
 from app.models.chapter import Chapter
 from app.services.ai_service import AIService
+from app.services.json_helper import loads_json
 from app.services.prompt_service import prompt_service, PromptService
 from app.logger import get_logger
 
@@ -531,7 +532,7 @@ class PlotExpansionService:
             cleaned_text = self.ai_service._clean_json_response(ai_response)
             
             # 解析JSON
-            chapter_plans = json.loads(cleaned_text)
+            chapter_plans = loads_json(cleaned_text)
             
             # 确保是列表
             if not isinstance(chapter_plans, list):
