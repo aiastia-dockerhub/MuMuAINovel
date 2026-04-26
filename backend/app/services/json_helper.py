@@ -56,13 +56,39 @@ def _fix_json_string_values(text: str) -> str:
         
         if in_string:
             if c == '\\':
-                # 转义字符，跳过下一个字符
-                result.append(c)
+                # 转义字符，检查下一个字符是否合法
                 if i + 1 < len(text):
+                    next_c = text[i + 1]
+                    # JSON 合法转义：\" \\ \/ \b \f \n \r \t \uXXXX
+                    if next_c in ('"', '\\', '/', 'b', 'f', 'n', 'r', 't'):
+                        # 合法转义，直接保留
+                        result.append(c)
+                        result.append(next_c)
+                        i += 2
+                        continue
+                    elif next_c == 'u':
+                        # Unicode 转义 \uXXXX，检查是否有4个十六进制字符
+                        if i + 5 < len(text) and all(text[i+2+k] in '0123456789abcdefABCDEF' for k in range(4)):
+                            result.append(text[i:i+6])
+                            i += 6
+                            continue
+                        else:
+                            # 不完整的unicode转义，去掉反斜杠
+                            result.append(next_c)
+                            fixed_count += 1
+                            i += 2
+                            continue
+                    else:
+                        # 非法转义字符（如 \c \p \d 等），去掉反斜杠只保留字符
+                        result.append(next_c)
+                        fixed_count += 1
+                        i += 2
+                        continue
+                else:
+                    # 末尾孤立的反斜杠，去掉
+                    fixed_count += 1
                     i += 1
-                    result.append(text[i])
-                i += 1
-                continue
+                    continue
             
             if c == '"':
                 # 字符串结束
