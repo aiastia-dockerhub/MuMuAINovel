@@ -1284,7 +1284,7 @@ class ForeshadowService:
             planted_foreshadows = await self.get_planted_foreshadows_for_analysis(db, project_id)
             
             # 每章最多创建的新伏笔数量
-            MAX_NEW_FORESHADOWS_PER_CHAPTER = 2
+            MAX_NEW_FORESHADOWS_PER_CHAPTER = 5
             new_foreshadow_count = 0
 
             for fs_data in analysis_foreshadows:
