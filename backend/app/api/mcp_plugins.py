@@ -215,22 +215,26 @@ async def create_plugin(
         **plugin_data
     )
     
+    # 如果启用，设为pending状态等待后台连接
+    if plugin.enabled:
+        plugin.status = "pending"
+    
     db.add(plugin)
     await db.commit()
     await db.refresh(plugin)
     
-    # 如果启用，注册到统一门面
+    # 如果启用，后台注册到统一门面（避免MCP操作阻塞导致超时）
     if plugin.enabled:
-        success = await _register_plugin_to_facade(plugin, user.user_id)
-        if success:
-            plugin.status = "active"
-        else:
-            plugin.status = "error"
-            plugin.last_error = "加载失败"
-        await db.commit()
-        await db.refresh(plugin)
+        asyncio.create_task(_register_plugin_background(
+            user_id=user.user_id,
+            plugin_name=plugin.plugin_name,
+            plugin_type=plugin.plugin_type,
+            server_url=plugin.server_url,
+            headers=plugin.headers,
+            config=plugin.config
+        ))
     
-    logger.info(f"用户 {user.user_id} 创建插件: {plugin.plugin_name}")
+    logger.info(f"用户 {user.user_id} 创建插件: {plugin.plugin_name}（MCP注册在后台执行）")
     return plugin
 
 
@@ -438,15 +442,29 @@ async def update_plugin(
     for key, value in update_data.items():
         setattr(plugin, key, value)
     
+    # 如果启用，设为pending状态等待后台连接
+    if plugin.enabled:
+        plugin.status = "pending"
+        plugin.last_error = None
+    
     await db.commit()
     await db.refresh(plugin)
     
-    # 如果插件已启用，重新注册
+    # 如果插件已启用，后台重新注册MCP连接
     if plugin.enabled:
-        await mcp_client.unregister(user.user_id, plugin.plugin_name)
-        await _register_plugin_to_facade(plugin, user.user_id)
+        # 先后台注销旧连接
+        asyncio.create_task(_unregister_plugin_safe(user.user_id, plugin.plugin_name))
+        # 再后台注册新连接
+        asyncio.create_task(_register_plugin_background(
+            user_id=user.user_id,
+            plugin_name=plugin.plugin_name,
+            plugin_type=plugin.plugin_type,
+            server_url=plugin.server_url,
+            headers=plugin.headers,
+            config=plugin.config
+        ))
     
-    logger.info(f"用户 {user.user_id} 更新插件: {plugin.plugin_name}")
+    logger.info(f"用户 {user.user_id} 更新插件: {plugin.plugin_name}（MCP操作在后台执行）")
     return plugin
 
 
@@ -470,15 +488,19 @@ async def delete_plugin(
     if not plugin:
         raise HTTPException(status_code=404, detail="插件不存在")
     
-    # 从统一门面注销
-    await mcp_client.unregister(user.user_id, plugin.plugin_name)
+    # 保存插件信息用于后台注销
+    plugin_name = plugin.plugin_name
+    user_id = user.user_id
     
-    # 删除数据库记录
+    # 先删除数据库记录
     await db.delete(plugin)
     await db.commit()
     
-    logger.info(f"用户 {user.user_id} 删除插件: {plugin.plugin_name}")
-    return {"message": "插件已删除", "plugin_name": plugin.plugin_name}
+    # 后台从统一门面注销（避免MCP操作阻塞导致超时）
+    asyncio.create_task(_unregister_plugin_safe(user_id, plugin_name))
+    
+    logger.info(f"用户 {user.user_id} 删除插件: {plugin_name}（MCP注销在后台执行）")
+    return {"message": "插件已删除", "plugin_name": plugin_name}
 
 
 @router.post("/{plugin_id}/toggle", response_model=MCPPluginResponse)
@@ -490,6 +512,10 @@ async def toggle_plugin(
 ):
     """
     启用或禁用插件
+    
+    启用时：先更新数据库状态为pending，再通过后台任务注册MCP连接，
+    避免长时间持有数据库会话导致超时。
+    禁用时：先更新数据库状态，再通过后台任务注销MCP连接。
     """
     result = await db.execute(
         select(MCPPlugin).where(
@@ -509,51 +535,35 @@ async def toggle_plugin(
     headers = plugin.headers
     config = plugin.config
     
-    # 先更新数据库状态
+    # 更新数据库状态
     plugin.enabled = enabled
-    if not enabled:
+    if enabled:
+        # 启用时先设为pending状态，等待后台MCP连接完成
+        plugin.status = "pending"
+        plugin.last_error = None
+    else:
         plugin.status = "inactive"
     
     await db.commit()
     await db.refresh(plugin)
     
-    # 数据库操作完成后，再进行MCP操作
+    # 数据库操作完成后，通过后台任务进行MCP操作（避免长时间持有数据库会话）
     if enabled:
-        # 启用：注册到统一门面
-        try:
-            if plugin_type in HTTP_PLUGIN_TYPES and server_url:
-                server_url = _validate_mcp_server_url(plugin_type, server_url)
-                success = await mcp_client.register(MCPPluginConfig(
-                    user_id=user.user_id,
-                    plugin_name=plugin_name,
-                    url=server_url,
-                    plugin_type=plugin_type,
-                    headers=headers,
-                    timeout=config.get('timeout', 60.0) if config else 60.0
-                ))
-            else:
-                success = False
-            
-            # 更新状态
-            plugin.status = "active" if success else "error"
-            plugin.last_error = None if success else "加载失败"
-            await db.commit()
-            await db.refresh(plugin)
-        except Exception as e:
-            logger.error(f"注册插件失败: {plugin_name}, 错误: {e}")
-            plugin.status = "error"
-            plugin.last_error = str(e)
-            await db.commit()
-            await db.refresh(plugin)
+        # 启用：后台注册到统一门面
+        asyncio.create_task(_register_plugin_background(
+            user_id=user.user_id,
+            plugin_name=plugin_name,
+            plugin_type=plugin_type,
+            server_url=server_url,
+            headers=headers,
+            config=config
+        ))
     else:
-        # 禁用：从统一门面注销（不影响数据库状态）
-        try:
-            await mcp_client.unregister(user.user_id, plugin_name)
-        except Exception as e:
-            logger.warning(f"注销插件时出错（可忽略）: {plugin_name}, 错误: {e}")
+        # 禁用：后台从统一门面注销（不影响数据库状态）
+        asyncio.create_task(_unregister_plugin_safe(user.user_id, plugin_name))
     
     action = "启用" if enabled else "禁用"
-    logger.info(f"用户 {user.user_id} {action}插件: {plugin_name}")
+    logger.info(f"用户 {user.user_id} {action}插件: {plugin_name}（MCP操作在后台执行）")
     return plugin
 
 
