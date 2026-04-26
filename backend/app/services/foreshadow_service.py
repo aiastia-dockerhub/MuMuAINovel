@@ -1283,6 +1283,10 @@ class ForeshadowService:
             # 预先获取所有已埋入的伏笔，用于内容匹配
             planted_foreshadows = await self.get_planted_foreshadows_for_analysis(db, project_id)
             
+            # 每章最多创建的新伏笔数量
+            MAX_NEW_FORESHADOWS_PER_CHAPTER = 2
+            new_foreshadow_count = 0
+
             for fs_data in analysis_foreshadows:
                 try:
                     fs_type = fs_data.get("type", "planted")
@@ -1416,6 +1420,11 @@ class ForeshadowService:
                             logger.info(f"📝 更新已存在伏笔（避免重复）: {fs_title} (ID: {existing_fs.id})")
                         else:
                             # 创建新伏笔
+                            # 检查每章新伏笔数量上限
+                            if new_foreshadow_count >= MAX_NEW_FORESHADOWS_PER_CHAPTER:
+                                logger.info(f"🚫 已达每章新伏笔上限({MAX_NEW_FORESHADOWS_PER_CHAPTER}个)，跳过: {fs_title}")
+                                continue
+                            
                             # 不再为 estimated_resolve_chapter 设置默认值，避免误报"超期"
                             estimated_resolve = fs_data.get("estimated_resolve_chapter")
                             if estimated_resolve is None:
@@ -1448,10 +1457,11 @@ class ForeshadowService:
                             db.add(new_foreshadow)
                             await db.flush()
                             
+                            new_foreshadow_count += 1
                             stats["planted_count"] += 1
                             stats["created_count"] += 1
                             stats["created_ids"].append(new_foreshadow.id)
-                            logger.info(f"✅ 自动创建伏笔: {fs_title} (ID: {new_foreshadow.id})")
+                            logger.info(f"✅ 自动创建伏笔: {fs_title} (ID: {new_foreshadow.id}) [{new_foreshadow_count}/{MAX_NEW_FORESHADOWS_PER_CHAPTER}]")
                     
                 except Exception as item_error:
                     error_msg = f"处理伏笔时出错: {str(item_error)}"
