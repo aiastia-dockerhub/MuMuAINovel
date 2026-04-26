@@ -152,6 +152,63 @@ def _fix_json_string_values(text: str) -> str:
     return ''.join(result)
 
 
+def _fix_all_invalid_escapes(text: str) -> str:
+    """
+    兜底修复：扫描整个文本中的无效JSON转义序列。
+    
+    当 _fix_json_string_values 因字符串边界追踪错误而遗漏某些无效转义时，
+    此函数作为兜底，不依赖字符串状态追踪，扫描整个文本修复所有无效转义。
+    
+    有效JSON转义：\\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX
+    其他 \\X 均为无效转义，修复方式为去掉反斜杠只保留字符。
+    """
+    if '\\' not in text:
+        return text
+    
+    result = []
+    i = 0
+    fixed = 0
+    
+    while i < len(text):
+        if text[i] == '\\' and i + 1 < len(text):
+            next_c = text[i + 1]
+            if next_c in ('"', '\\', '/', 'b', 'f', 'n', 'r', 't'):
+                # 有效转义，保留
+                result.append(text[i])
+                result.append(next_c)
+                i += 2
+                continue
+            elif next_c == 'u':
+                # Unicode 转义，检查是否有4个十六进制字符
+                if i + 5 < len(text) and all(
+                    text[i + 2 + k] in '0123456789abcdefABCDEF' 
+                    for k in range(4)
+                ):
+                    result.append(text[i:i + 6])
+                    i += 6
+                    continue
+                else:
+                    # 不完整的unicode转义，去掉反斜杠
+                    result.append(next_c)
+                    fixed += 1
+                    i += 2
+                    continue
+            else:
+                # 无效转义（如 \引 \影 \某种 等），去掉反斜杠只保留字符
+                result.append(next_c)
+                fixed += 1
+                i += 2
+                continue
+        else:
+            result.append(text[i])
+            i += 1
+    
+    if fixed > 0:
+        logger.info(f"✅ 兜底修复了{fixed}个无效JSON转义序列")
+    
+    return ''.join(result)
+
+
 def clean_json_response(text: str) -> str:
     """清洗 AI 返回的 JSON（改进版 - 流式安全）"""
     try:
@@ -286,9 +343,16 @@ def clean_json_response(text: str) -> str:
             json.loads(result)
             logger.debug(f"✅ 清洗后JSON验证成功")
         except json.JSONDecodeError as e:
-            logger.error(f"❌ 清洗后JSON仍然无效: {e}")
-            logger.debug(f"   结果预览: {result[:500]}")
-            logger.debug(f"   结果结尾: ...{result[-200:]}")
+            logger.warning(f"⚠️ 清洗后JSON仍然无效: {e}，尝试兜底修复无效转义...")
+            # 兜底修复：扫描所有无效转义序列（不依赖字符串边界追踪）
+            result = _fix_all_invalid_escapes(result)
+            try:
+                json.loads(result)
+                logger.info(f"✅ 兜底修复后JSON验证成功")
+            except json.JSONDecodeError as e2:
+                logger.error(f"❌ 兜底修复后JSON仍然无效: {e2}")
+                logger.debug(f"   结果预览: {result[:500]}")
+                logger.debug(f"   结果结尾: ...{result[-200:]}")
         
         return result
         
@@ -339,6 +403,16 @@ def loads_json(text: str) -> Any:
     except (json.JSONDecodeError, Exception):
         pass
     
+    # 兜底修复无效转义序列后重试
+    fixed_text = _fix_all_invalid_escapes(text)
+    if fixed_text != text:
+        try:
+            result = json.loads(fixed_text)
+            logger.info("✅ 兜底修复无效转义后json.loads成功")
+            return result
+        except (json.JSONDecodeError, Exception):
+            pass
+    
     # json5 容错解析
     if HAS_JSON5:
         try:
@@ -347,6 +421,14 @@ def loads_json(text: str) -> Any:
             logger.info("✅ json5容错解析成功")
             return result
         except Exception as e5:
+            # json5也失败，尝试对修复后的文本使用json5
+            if fixed_text != text:
+                try:
+                    result = json5.loads(fixed_text)
+                    logger.info("✅ 兜底修复无效转义后json5容错解析成功")
+                    return result
+                except Exception:
+                    pass
             logger.error(f"❌ json5容错解析也失败: {e5}")
     
     # 最终失败，抛出标准异常
