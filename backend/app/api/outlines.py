@@ -1451,7 +1451,7 @@ async def continue_outline_generator(
             # 获取伏笔提醒信息（用于大纲续写）
             foreshadow_reminders_text = "暂无需要关注的伏笔"
             try:
-                foreshadow_context = await foreshadow_service.build_foreshadow_context(
+                foreshadow_context = await foreshadow_service.build_chapter_context(
                     db=db,
                     project_id=project_id,
                     chapter_number=current_start_chapter,
