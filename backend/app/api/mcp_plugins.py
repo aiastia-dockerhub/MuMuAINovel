@@ -54,65 +54,75 @@ async def _register_plugin_background(
     plugin_type: str,
     server_url: str,
     headers: Optional[dict],
-    config: Optional[dict]
+    config: Optional[dict],
+    max_retries: int = 2,
+    retry_delay: float = 3.0
 ):
     """
-    后台任务：注册MCP插件并更新数据库状态
+    后台任务：注册MCP插件并更新数据库状态（带重试）
 
-    在独立的任务中执行MCP连接，避免阻塞请求处理
+    在独立的任务中执行MCP连接，避免阻塞请求处理。
+    连接失败时会自动重试，提高对临时网络问题的容错性。
     """
+    last_error = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            if attempt > 0:
+                logger.info(f"后台注册MCP插件重试 ({attempt}/{max_retries}): {plugin_name}")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.info(f"后台注册MCP插件: {plugin_name}")
+
+            if plugin_type in HTTP_PLUGIN_TYPES and server_url:
+                server_url = _validate_mcp_server_url(plugin_type, server_url)
+                success = await mcp_client.register(MCPPluginConfig(
+                    user_id=user_id,
+                    plugin_name=plugin_name,
+                    url=server_url,
+                    plugin_type=plugin_type,
+                    headers=headers,
+                    timeout=config.get('timeout', 60.0) if config else 60.0
+                ))
+            else:
+                success = False
+
+            if success:
+                # 更新数据库状态为active
+                engine = await get_engine(user_id)
+                AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with AsyncSessionLocal() as db:
+                    stmt = (
+                        update(MCPPlugin)
+                        .where(MCPPlugin.user_id == user_id, MCPPlugin.plugin_name == plugin_name)
+                        .values(status="active", last_error=None)
+                    )
+                    await db.execute(stmt)
+                    await db.commit()
+                logger.info(f"后台注册MCP插件成功: {plugin_name}")
+                return
+            else:
+                last_error = "连接失败"
+                
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"后台注册MCP插件异常 (尝试 {attempt + 1}/{max_retries + 1}): {plugin_name}, 错误: {e}")
+    
+    # 所有重试都失败，更新数据库状态为error
+    logger.error(f"后台注册MCP插件最终失败 (已重试{max_retries}次): {plugin_name}, 错误: {last_error}")
     try:
-        logger.info(f"后台注册MCP插件: {plugin_name}")
-
-        if plugin_type in HTTP_PLUGIN_TYPES and server_url:
-            server_url = _validate_mcp_server_url(plugin_type, server_url)
-            success = await mcp_client.register(MCPPluginConfig(
-                user_id=user_id,
-                plugin_name=plugin_name,
-                url=server_url,
-                plugin_type=plugin_type,
-                headers=headers,
-                timeout=config.get('timeout', 60.0) if config else 60.0
-            ))
-        else:
-            success = False
-
-        # 更新数据库状态
         engine = await get_engine(user_id)
         AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
         async with AsyncSessionLocal() as db:
             stmt = (
                 update(MCPPlugin)
                 .where(MCPPlugin.user_id == user_id, MCPPlugin.plugin_name == plugin_name)
-                .values(
-                    status="active" if success else "error",
-                    last_error=None if success else "连接失败"
-                )
+                .values(status="error", last_error=str(last_error)[:500] if last_error else "连接失败")
             )
             await db.execute(stmt)
             await db.commit()
-
-        if success:
-            logger.info(f"后台注册MCP插件成功: {plugin_name}")
-        else:
-            logger.warning(f"后台注册MCP插件失败: {plugin_name}")
-
-    except Exception as e:
-        logger.error(f"后台注册MCP插件异常: {plugin_name}, 错误: {e}")
-        try:
-            engine = await get_engine(user_id)
-            AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with AsyncSessionLocal() as db:
-                stmt = (
-                    update(MCPPlugin)
-                    .where(MCPPlugin.user_id == user_id, MCPPlugin.plugin_name == plugin_name)
-                    .values(status="error", last_error=str(e))
-                )
-                await db.execute(stmt)
-                await db.commit()
-        except Exception as db_error:
-            logger.error(f"更新插件状态失败: {db_error}")
+    except Exception as db_error:
+        logger.error(f"更新插件状态失败: {db_error}")
 
 
 async def _unregister_plugin_safe(user_id: str, plugin_name: str):
