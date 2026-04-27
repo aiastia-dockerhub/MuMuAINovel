@@ -3,6 +3,7 @@ import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge,
 import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
+import { generateChapterBackground } from '../services/backgroundTaskService';
 import { projectApi, writingStyleApi, chapterApi } from '../services/api';
 import type { Chapter, ChapterUpdate, ApiError, WritingStyle, AnalysisTask, ExpansionPlanData } from '../types';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
@@ -96,6 +97,13 @@ export default function Chapters() {
   // 单章节生成进度状态
   const [singleChapterProgress, setSingleChapterProgress] = useState(0);
   const [singleChapterProgressMessage, setSingleChapterProgressMessage] = useState('');
+
+  // 后台生成任务状态
+  const [bgTaskVisible, setBgTaskVisible] = useState(false);
+  const [bgTaskProgress, setBgTaskProgress] = useState(0);
+  const [bgTaskMessage, setBgTaskMessage] = useState('');
+  const [bgTaskRunning, setBgTaskRunning] = useState(false);
+  const bgTaskCancelRef = useRef<(() => void) | null>(null);
 
   // 批量生成相关状态
   const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
@@ -971,6 +979,58 @@ export default function Chapters() {
     });
   };
 
+
+  // 后台生成章节（关闭浏览器也不影响）
+  const handleBackgroundGenerate = async () => {
+    if (!editingId) return;
+    if (!selectedStyleId) {
+      message.error("请先选择写作风格");
+      return;
+    }
+
+    try {
+      setBgTaskVisible(true);
+      setBgTaskRunning(true);
+      setBgTaskProgress(0);
+      setBgTaskMessage("正在创建后台任务...");
+
+      const cancelFn = await generateChapterBackground(
+        editingId,
+        {
+          style_id: selectedStyleId,
+          target_word_count: targetWordCount,
+          model: selectedModel,
+          narrative_perspective: temporaryNarrativePerspective,
+        },
+        (status) => {
+          setBgTaskProgress(status.progress || 0);
+          setBgTaskMessage(status.status_message || "处理中...");
+        },
+        (_) => {
+          setBgTaskProgress(100);
+          setBgTaskMessage("生成完成！");
+          setBgTaskRunning(false);
+          message.success("后台章节生成完成！");
+          refreshChapters();
+          if (currentProject) {
+            projectApi.getProject(currentProject.id).then(setCurrentProject).catch(console.error);
+          }
+          loadAnalysisTasks();
+        },
+        (error) => {
+          setBgTaskRunning(false);
+          setBgTaskMessage("失败: " + error);
+          message.error("后台生成失败: " + error);
+        }
+      );
+
+      bgTaskCancelRef.current = cancelFn;
+      message.info("已提交后台生成任务，可以关闭此页面");
+    } catch (error) {
+      message.error("创建后台任务失败");
+      setBgTaskRunning(false);
+    }
+  };
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       'draft': 'default',
@@ -2497,22 +2557,55 @@ export default function Chapters() {
                 const disabledReason = currentChapter ? getGenerateDisabledReason(currentChapter) : '';
 
                 return (
+                  <>
                   <Button
                     type="primary"
                     icon={canGenerate ? <ThunderboltOutlined /> : <LockOutlined />}
                     onClick={() => currentChapter && showGenerateModal(currentChapter)}
                     loading={isContinuing}
-                    disabled={!canGenerate}
+                    disabled={!canGenerate || bgTaskRunning}
                     danger={!canGenerate}
                     style={{ fontWeight: 'bold' }}
-                    title={!canGenerate ? disabledReason : '根据大纲和前置章节内容创作'}
+                    title={!canGenerate ? disabledReason : '根据大纲和前置章节内容创作（流式）'}
                   >
                     {isMobile ? 'AI' : 'AI创作'}
                   </Button>
+                  <Button
+                    icon={<RocketOutlined />}
+                    onClick={handleBackgroundGenerate}
+                    disabled={!canGenerate || bgTaskRunning || isContinuing}
+                    loading={bgTaskRunning}
+                    style={{ fontWeight: 'bold' }}
+                    title={!canGenerate ? disabledReason : '后台生成：关闭浏览器也不影响，完成后自动保存'}
+                  >
+                    {isMobile ? '后台' : '后台生成'}
+                  </Button>
+                  </>
                 );
               })()}
             </Space.Compact>
           </Form.Item>
+
+          {/* 后台生成进度 */}
+          {bgTaskVisible && (
+            <Alert
+              message={bgTaskRunning ? '后台生成进行中...' : '后台生成完成'}
+              description={
+                <div>
+                  <div style={{ marginBottom: 8 }}>{bgTaskMessage}</div>
+                  <div style={{ background: '#f0f0f0', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                    <div style={{ background: '#1890ff', height: '100%', width: bgTaskProgress + '%', transition: 'width 0.3s' }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{bgTaskProgress}%</div>
+                </div>
+              }
+              type={bgTaskRunning ? 'info' : (bgTaskProgress >= 100 ? 'success' : 'error')}
+              showIcon
+              style={{ marginBottom: 12 }}
+              closable={!bgTaskRunning}
+              onClose={() => setBgTaskVisible(false)}
+            />
+          )}
 
           {/* 第一行：写作风格 + 叙事角度 */}
           <div style={{
