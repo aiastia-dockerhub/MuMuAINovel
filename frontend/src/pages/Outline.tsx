@@ -1,10 +1,11 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+﻿import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs, Pagination, theme } from 'antd';
 import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useOutlineSync } from '../store/hooks';
 import { SSEPostClient } from '../utils/sseClient';
 import { SSEProgressModal } from '../components/SSEProgressModal';
+import { generateOutlineBackground, cancelTask } from '../services/backgroundTaskService';
 import { outlineApi, chapterApi, projectApi, characterApi } from '../services/api';
 import type { OutlineExpansionResponse, BatchOutlineExpansionResponse, ChapterPlanItem, ApiError, Character } from '../types';
 
@@ -153,6 +154,9 @@ export default function Outline() {
   const [sseProgress, setSSEProgress] = useState(0);
   const [sseMessage, setSSEMessage] = useState('');
   const [sseModalVisible, setSSEModalVisible] = useState(false);
+
+  // 后台任务取消函数引用
+  const cancelGenerateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -573,33 +577,31 @@ export default function Outline() {
       console.log('6. 最终请求数据:', JSON.stringify(requestData, null, 2));
       console.log('=========================');
 
-      // 使用SSE客户端
-      const apiUrl = `/api/outlines/generate-stream`;
-      const client = new SSEPostClient(apiUrl, requestData, {
-        onProgress: (msg: string, progress: number) => {
-          setSSEMessage(msg);
-          setSSEProgress(progress);
+      // 使用后台任务生成（不怕断连，关闭浏览器也继续运行）
+      setSSEMessage('正在创建后台任务...');
+
+      const cancelFn = await generateOutlineBackground(
+        requestData,
+        (status) => {
+          setSSEProgress(status.progress);
+          setSSEMessage(status.status_message || '处理中...');
         },
-        onResult: (data: unknown) => {
-          console.log('生成完成，结果:', data);
+        (result) => {
+          message.success(result.task_result?.message as string || '大纲生成完成！');
+          setSSEModalVisible(false);
+          setIsGenerating(false);
+          cancelGenerateRef.current = null;
+          refreshOutlines();
         },
-        onError: (error: string) => {
-          // 现在只处理真正的错误
+        (error) => {
           message.error(`生成失败: ${error}`);
           setSSEModalVisible(false);
           setIsGenerating(false);
-        },
-        onComplete: () => {
-          message.success('大纲生成完成！');
-          setSSEModalVisible(false);
-          setIsGenerating(false);
-          // 刷新大纲列表
-          refreshOutlines();
+          cancelGenerateRef.current = null;
         }
-      });
+      );
 
-      // 开始连接
-      client.connect();
+      cancelGenerateRef.current = cancelFn;
 
     } catch (error) {
       console.error('AI生成失败:', error);
@@ -1923,7 +1925,16 @@ export default function Outline() {
         visible={sseModalVisible}
         progress={sseProgress}
         message={sseMessage}
-        title="AI生成中..."
+        title="AI生成中（后台运行，可关闭页面）..."
+        onCancel={() => {
+          if (cancelGenerateRef.current) {
+            cancelGenerateRef.current();
+            cancelGenerateRef.current = null;
+          }
+          setSSEModalVisible(false);
+          setIsGenerating(false);
+          message.info('已取消生成任务');
+        }}
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
