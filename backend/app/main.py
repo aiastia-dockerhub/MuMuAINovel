@@ -32,9 +32,10 @@ async def lifespan(app: FastAPI):
 
     # 安全保障：确保后台任务表存在（兼容未执行Alembic迁移的旧部署）
     try:
-        from app.database import engine
+        from app.database import get_engine
         from app.models.background_task import BackgroundTask
-        async with engine.begin() as conn:
+        _startup_engine = await get_engine("system")
+        async with _startup_engine.begin() as conn:
             # 仅创建 background_tasks 表（如果不存在），不影响其他表
             await conn.run_sync(
                 lambda sync_conn: BackgroundTask.__table__.create(sync_conn, checkfirst=True)
