@@ -187,3 +187,41 @@ export async function generateOutlineBackground(
     cancelTask(task_id).catch(() => {});
   };
 }
+
+/**
+ * 请求后台生成章节内容并轮询进度
+ * 关闭浏览器不影响生成，生成完成后内容自动保存到数据库
+ */
+export async function generateChapterBackground(
+  chapterId: string,
+  options: {
+    style_id?: number | null;
+    target_word_count?: number;
+    model?: string | null;
+    narrative_perspective?: string | null;
+    enable_mcp?: boolean;
+  },
+  onProgress: TaskProgressCallback,
+  onComplete: TaskCompleteCallback,
+  onError: TaskErrorCallback
+): Promise<() => void> {
+  const response = await fetch(`/api/chapters/${chapterId}/generate-background`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: response.statusText }));
+    onError(err.detail || '创建章节生成任务失败', {} as TaskStatus);
+    return () => {};
+  }
+
+  const { task_id } = await response.json();
+  const cancelPolling = pollTaskUntilComplete(task_id, onProgress, onComplete, onError);
+
+  return () => {
+    cancelPolling();
+    cancelTask(task_id).catch(() => {});
+  };
+}
