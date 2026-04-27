@@ -153,67 +153,73 @@ class TaskProgressTracker:
 
 
 class BackgroundTaskService:
-    """后台任务管理服务（带任务队列，排队逐个执行）"""
+    """后台任务管理服务（按用户排队：同用户任务逐个执行，不同用户可并发）"""
 
     def __init__(self):
-        self._queue: asyncio.Queue = None  # 延迟初始化
-        self._worker_running = False
+        self._user_queues: Dict[str, asyncio.Queue] = {}   # user_id -> Queue
+        self._user_workers: Dict[str, bool] = {}            # user_id -> worker是否运行中
 
-    def _ensure_queue(self):
-        """确保队列已初始化（在事件循环内调用）"""
-        if self._queue is None:
-            self._queue = asyncio.Queue()
+    def _ensure_user_queue(self, user_id: str) -> asyncio.Queue:
+        """确保指定用户的队列已初始化"""
+        if user_id not in self._user_queues:
+            self._user_queues[user_id] = asyncio.Queue()
+        return self._user_queues[user_id]
 
-    async def _start_worker(self):
-        """启动队列工作协程"""
-        if self._worker_running:
+    async def _start_user_worker(self, user_id: str):
+        """启动指定用户的工作协程"""
+        if self._user_workers.get(user_id, False):
             return
-        self._worker_running = True
-        asyncio.create_task(self._worker_loop())
-        logger.info("📋 后台任务队列工作协程已启动")
+        self._user_workers[user_id] = True
+        asyncio.create_task(self._user_worker_loop(user_id))
+        logger.info(f"📋 用户 {user_id[:8]} 的任务队列工作协程已启动")
 
-    async def _worker_loop(self):
-        """从队列中逐个取出任务并执行"""
-        while True:
-            try:
-                task_item = await self._queue.get()
-                task_id = task_item["task_id"]
-                task_func = task_item["task_func"]
-                args = task_item["args"]
-                kwargs = task_item["kwargs"]
-
-                logger.info(f"🔄 队列开始执行任务: {task_id[:8]} (队列剩余: {self._queue.qsize()})")
-
+    async def _user_worker_loop(self, user_id: str):
+        """从指定用户的队列中逐个取出任务并执行"""
+        queue = self._user_queues[user_id]
+        try:
+            while True:
                 try:
-                    await task_func(task_id, args["user_id"], *args["extra_args"], **kwargs)
-                except Exception as e:
-                    logger.error(f"❌ 后台任务 {task_id[:8]} 异常: {e}", exc_info=True)
-                    # 确保任务状态更新为失败
-                    try:
-                        user_id = args["user_id"]
-                        engine = await get_engine(user_id)
-                        AsyncSessionLocal = async_sessionmaker(
-                            engine, class_=AsyncSession, expire_on_commit=False
-                        )
-                        async with AsyncSessionLocal() as session:
-                            result = await session.execute(
-                                select(BackgroundTask).where(BackgroundTask.id == task_id)
-                            )
-                            task = result.scalar_one_or_none()
-                            if task and task.status == "running":
-                                task.status = "failed"
-                                task.error_message = str(e)
-                                task.status_message = f"任务失败: {str(e)}"
-                                task.completed_at = datetime.now()
-                                await session.commit()
-                    except Exception as update_err:
-                        logger.error(f"❌ 更新失败任务状态失败: {update_err}")
-                finally:
-                    self._queue.task_done()
-                    logger.info(f"✅ 队列任务完成: {task_id[:8]} (队列剩余: {self._queue.qsize()})")
+                    task_item = await queue.get()
+                    task_id = task_item["task_id"]
+                    task_func = task_item["task_func"]
+                    args = task_item["args"]
+                    kwargs = task_item["kwargs"]
 
-            except Exception as e:
-                logger.error(f"❌ 队列工作循环异常: {e}", exc_info=True)
+                    logger.info(f"🔄 [用户{user_id[:8]}] 队列开始执行任务: {task_id[:8]} (队列剩余: {queue.qsize()})")
+
+                    try:
+                        await task_func(task_id, args["user_id"], *args["extra_args"], **kwargs)
+                    except Exception as e:
+                        logger.error(f"❌ 后台任务 {task_id[:8]} 异常: {e}", exc_info=True)
+                        # 确保任务状态更新为失败
+                        try:
+                            engine = await get_engine(user_id)
+                            AsyncSessionLocal = async_sessionmaker(
+                                engine, class_=AsyncSession, expire_on_commit=False
+                            )
+                            async with AsyncSessionLocal() as session:
+                                result = await session.execute(
+                                    select(BackgroundTask).where(BackgroundTask.id == task_id)
+                                )
+                                task = result.scalar_one_or_none()
+                                if task and task.status == "running":
+                                    task.status = "failed"
+                                    task.error_message = str(e)
+                                    task.status_message = f"任务失败: {str(e)}"
+                                    task.completed_at = datetime.now()
+                                    await session.commit()
+                        except Exception as update_err:
+                            logger.error(f"❌ 更新失败任务状态失败: {update_err}")
+                    finally:
+                        queue.task_done()
+                        logger.info(f"✅ [用户{user_id[:8]}] 队列任务完成: {task_id[:8]} (队列剩余: {queue.qsize()})")
+
+                except Exception as e:
+                    logger.error(f"❌ [用户{user_id[:8]}] 队列工作循环异常: {e}", exc_info=True)
+        finally:
+            # 工作协程退出时清理标记
+            self._user_workers.pop(user_id, None)
+            logger.info(f"📋 用户 {user_id[:8]} 的工作协程已退出")
 
     @staticmethod
     async def create_task(
@@ -318,7 +324,7 @@ class BackgroundTaskService:
         **kwargs
     ):
         """
-        将任务加入队列排队执行（FIFO，同一时间只运行一个任务）
+        将任务加入该用户的队列排队执行（同一用户FIFO，不同用户可并发）
         
         Args:
             task_id: 任务ID
@@ -326,19 +332,19 @@ class BackgroundTaskService:
             task_func: 异步任务函数
             *args, **kwargs: 传递给task_func的参数
         """
-        # 确保队列和工作协程已启动
-        self._ensure_queue()
-        await self._start_worker()
+        # 确保该用户的队列和工作协程已启动
+        queue = self._ensure_user_queue(user_id)
+        await self._start_user_worker(user_id)
 
-        # 将任务放入队列
-        await self._queue.put({
+        # 将任务放入该用户的队列
+        await queue.put({
             "task_id": task_id,
             "task_func": task_func,
             "args": {"user_id": user_id, "extra_args": args},
             "kwargs": kwargs,
         })
-        queue_size = self._queue.qsize()
-        logger.info(f"📥 任务已加入队列: {task_id[:8]} (当前队列长度: {queue_size})")
+        queue_size = queue.qsize()
+        logger.info(f"📥 任务已加入用户 {user_id[:8]} 的队列: {task_id[:8]} (当前队列长度: {queue_size})")
 
         # 更新任务状态，显示排队位置
         try:
@@ -362,11 +368,19 @@ class BackgroundTaskService:
         except Exception as e:
             logger.error(f"更新队列位置信息失败: {e}")
 
-    def get_queue_size(self) -> int:
-        """获取当前队列中等待的任务数量"""
-        if self._queue is None:
-            return 0
-        return self._queue.qsize()
+    def get_queue_size(self, user_id: str = None) -> int:
+        """获取队列中等待的任务数量"""
+        if user_id:
+            queue = self._user_queues.get(user_id)
+            return queue.qsize() if queue else 0
+        # 所有用户队列总数
+        return sum(q.qsize() for q in self._user_queues.values())
+
+    def get_all_queue_info(self) -> Dict[str, int]:
+        """获取所有用户的队列信息"""
+        return {
+            uid: q.qsize() for uid, q in self._user_queues.items() if q.qsize() > 0
+        }
 
 
 # 全局单例
