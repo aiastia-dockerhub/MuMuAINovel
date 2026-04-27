@@ -2154,7 +2154,8 @@ async def _run_continue_outline_bg(
             current_chapter_count=len(latest_outlines),
             plot_stage_instruction=stage_instruction,
             story_direction=data.get("story_direction", "自然延续"),
-            requirements=data.get("requirements", "")
+            requirements=data.get("requirements", ""),
+            mcp_references=""
         )
 
         accumulated_text = ""
