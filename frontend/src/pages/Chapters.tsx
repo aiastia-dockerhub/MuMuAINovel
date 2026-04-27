@@ -3,7 +3,7 @@ import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge,
 import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
-import { generateChapterBackground } from '../services/backgroundTaskService';
+import { generateChapterBackground, getProjectTasks, type TaskStatus as BgTaskStatus } from '../services/backgroundTaskService';
 import { projectApi, writingStyleApi, chapterApi } from '../services/api';
 import type { Chapter, ChapterUpdate, ApiError, WritingStyle, AnalysisTask, ExpansionPlanData } from '../types';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
@@ -104,6 +104,26 @@ export default function Chapters() {
   const [bgTaskMessage, setBgTaskMessage] = useState('');
   const [bgTaskRunning, setBgTaskRunning] = useState(false);
   const bgTaskCancelRef = useRef<(() => void) | null>(null);
+  const [projectBgTasks, setProjectBgTasks] = useState<BgTaskStatus[]>([]);
+  const bgPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 轮询项目后台任务
+  useEffect(() => {
+    if (!currentProject) return;
+    const pollBgTasks = async () => {
+      try {
+        const resp = await getProjectTasks(currentProject.id, 'chapter_generate', 10);
+        const active = resp.items.filter(t => t.status === 'pending' || t.status === 'running');
+        setProjectBgTasks(active);
+        // 如果有活跃任务，继续轮询
+        if (active.length > 0) {
+          bgPollTimerRef.current = setTimeout(pollBgTasks, 3000);
+        }
+      } catch {}
+    };
+    pollBgTasks();
+    return () => { if (bgPollTimerRef.current) clearTimeout(bgPollTimerRef.current); };
+  }, [currentProject]);
 
   // 批量生成相关状态
   const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
@@ -2014,6 +2034,57 @@ export default function Chapters() {
           </Button>
         </Space>
       </div>
+
+      {/* 后台生成任务进度 */}
+      {projectBgTasks.length > 0 && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 16px',
+          background: token.colorInfoBg,
+          borderRadius: token.borderRadius,
+          border: `1px solid ${token.colorInfoBorder}`
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <RocketOutlined style={{ color: token.colorInfo }} spin />
+            <span style={{ fontWeight: 600, color: token.colorInfo }}>
+              后台生成任务（{projectBgTasks.length}个进行中）
+            </span>
+            <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+              关闭浏览器也不影响，完成后自动保存
+            </span>
+          </div>
+          {projectBgTasks.map(task => (
+            <div key={task.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '6px 0',
+              borderBottom: `1px solid ${token.colorBorderSecondary}`
+            }}>
+              <Tag color={task.status === 'running' ? 'processing' : 'default'}
+                  style={{ minWidth: 50, textAlign: 'center' }}>
+                {task.status === 'running' ? '生成中' : '排队中'}
+              </Tag>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  background: token.colorBgLayout, borderRadius: 4,
+                  height: 6, overflow: 'hidden'
+                }}>
+                  <div style={{
+                    background: token.colorInfo, height: '100%',
+                    width: (task.progress || 0) + '%',
+                    transition: 'width 0.3s'
+                  }} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: token.colorTextSecondary, minWidth: 40, textAlign: 'right' }}>
+                {task.progress || 0}%
+              </span>
+              <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+                {task.status_message || ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {chapters.length === 0 ? (
