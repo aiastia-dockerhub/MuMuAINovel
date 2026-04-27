@@ -1,16 +1,15 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, Pagination, theme } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
+import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Progress, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, Pagination, theme } from 'antd';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined, ClockCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
-import { generateChapterBackground, getProjectTasks, type TaskStatus as BgTaskStatus } from '../services/backgroundTaskService';
+import { generateChapterBackground, getProjectTasks, cancelTask, deleteTask, type TaskStatus as BgTaskStatus } from '../services/backgroundTaskService';
 import { projectApi, writingStyleApi, chapterApi } from '../services/api';
 import type { Chapter, ChapterUpdate, ApiError, WritingStyle, AnalysisTask, ExpansionPlanData } from '../types';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import ChapterAnalysis from '../components/ChapterAnalysis';
 import ExpansionPlanEditor from '../components/ExpansionPlanEditor';
 import { SSELoadingOverlay } from '../components/SSELoadingOverlay';
-import { SSEProgressModal } from '../components/SSEProgressModal';
 import ChapterReader from '../components/ChapterReader';
 import PartialRegenerateToolbar from '../components/PartialRegenerateToolbar';
 import PartialRegenerateModal from '../components/PartialRegenerateModal';
@@ -106,6 +105,10 @@ export default function Chapters() {
   const bgTaskCancelRef = useRef<(() => void) | null>(null);
   const [projectBgTasks, setProjectBgTasks] = useState<BgTaskStatus[]>([]);
   const bgPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 后台任务列表 Modal 状态
+  const [taskListVisible, setTaskListVisible] = useState(false);
+  const [taskList, setTaskList] = useState<BgTaskStatus[]>([]);
+  const [taskListLoading, setTaskListLoading] = useState(false);
 
   // 轮询项目后台任务
   useEffect(() => {
@@ -124,6 +127,81 @@ export default function Chapters() {
     pollBgTasks();
     return () => { if (bgPollTimerRef.current) clearTimeout(bgPollTimerRef.current); };
   }, [currentProject]);
+
+  // 加载并显示后台任务列表
+  const showTaskListModal = async () => {
+    if (!currentProject?.id) return;
+    setTaskListVisible(true);
+    setTaskListLoading(true);
+    try {
+      const result = await getProjectTasks(currentProject.id);
+      setTaskList(result.items || []);
+    } catch (error) {
+      message.error('加载任务列表失败');
+    } finally {
+      setTaskListLoading(false);
+    }
+  };
+
+  // 刷新任务列表
+  const refreshTaskList = async () => {
+    if (!currentProject?.id) return;
+    setTaskListLoading(true);
+    try {
+      const result = await getProjectTasks(currentProject.id);
+      setTaskList(result.items || []);
+      const active = (result.items || []).filter(t => t.status === 'pending' || t.status === 'running');
+      setProjectBgTasks(active);
+    } catch (error) {
+      console.error('刷新任务列表失败:', error);
+    } finally {
+      setTaskListLoading(false);
+    }
+  };
+
+  // 获取任务状态标签
+  const getTaskStatusTag = (status: BgTaskStatus['status']) => {
+    switch (status) {
+      case 'pending': return <Tag icon={<ClockCircleOutlined />} color="default">等待中</Tag>;
+      case 'running': return <Tag icon={<LoadingOutlined />} color="processing">运行中</Tag>;
+      case 'completed': return <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>;
+      case 'failed': return <Tag icon={<CloseCircleOutlined />} color="error">失败</Tag>;
+      case 'cancelled': return <Tag icon={<CloseCircleOutlined />} color="default">已取消</Tag>;
+      default: return <Tag>{status}</Tag>;
+    }
+  };
+
+  // 获取任务类型标签
+  const getTaskTypeLabel = (taskType: string) => {
+    switch (taskType) {
+      case 'chapter_generate': return '章节生成';
+      case 'outline_new': return '大纲生成';
+      case 'outline_continue': return '大纲续写';
+      default: return taskType;
+    }
+  };
+
+  // 处理取消后台任务
+  const handleCancelBgTask = async (taskId: string) => {
+    try {
+      await cancelTask(taskId);
+      message.success('任务已取消');
+      refreshTaskList();
+    } catch (error) {
+      message.error('取消任务失败');
+    }
+  };
+
+  // 处理删除任务记录
+  const handleDeleteBgTask = async (taskId: string) => {
+    try {
+      await deleteTask(taskId);
+      message.success('任务记录已删除');
+      refreshTaskList();
+    } catch (error) {
+      message.error('删除任务记录失败');
+    }
+  };
 
   // 批量生成相关状态
   const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
@@ -2012,6 +2090,13 @@ export default function Chapters() {
             一键分析{batchAnalyzableChapterCount > 0 ? ` (${batchAnalyzableChapterCount})` : ''}
           </Button>
           <Button
+            icon={<ClockCircleOutlined />}
+            onClick={showTaskListModal}
+          >
+            后台任务
+            {projectBgTasks.length > 0 && <Badge count={projectBgTasks.length} size="small" style={{ marginLeft: 4 }} />}
+          </Button>
+          <Button
             type="primary"
             icon={<RocketOutlined />}
             onClick={handleOpenBatchGenerate}
@@ -2036,7 +2121,7 @@ export default function Chapters() {
       </div>
 
       {/* 后台生成任务进度 */}
-      {projectBgTasks.length > 0 && (
+      {(projectBgTasks.length > 0 || (batchGenerating && batchProgress)) && (
         <div style={{
           marginBottom: 16,
           padding: '12px 16px',
@@ -2047,12 +2132,58 @@ export default function Chapters() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <RocketOutlined style={{ color: token.colorInfo }} spin />
             <span style={{ fontWeight: 600, color: token.colorInfo }}>
-              后台生成任务（{projectBgTasks.length}个进行中）
+              后台生成任务
             </span>
             <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
               关闭浏览器也不影响，完成后自动保存
             </span>
           </div>
+          {/* 批量生成进度 */}
+          {batchGenerating && batchProgress && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '8px 0',
+              borderBottom: `1px solid ${token.colorBorderSecondary}`
+            }}>
+              <Tag color="processing" style={{ minWidth: 60, textAlign: 'center' }}>
+                批量生成
+              </Tag>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, marginBottom: 4, color: token.colorText }}>
+                  {batchProgress.current_chapter_number
+                    ? `正在生成第 ${batchProgress.current_chapter_number} 章`
+                    : '批量生成中...'} ({batchProgress.completed}/{batchProgress.total})
+                </div>
+                <div style={{
+                  background: token.colorBgLayout, borderRadius: 4,
+                  height: 8, overflow: 'hidden'
+                }}>
+                  <div style={{
+                    background: token.colorInfo, height: '100%',
+                    width: (batchProgress.total > 0 ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0) + '%',
+                    transition: 'width 0.3s'
+                  }} />
+                </div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: token.colorInfo, minWidth: 40, textAlign: 'right' }}>
+                {batchProgress.total > 0 ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}%
+              </span>
+              <Button size="small" danger onClick={() => {
+                modal.confirm({
+                  title: '确认取消',
+                  content: '确定要取消批量生成吗？已生成的章节将保留。',
+                  okText: '确定取消',
+                  cancelText: '继续生成',
+                  okButtonProps: { danger: true },
+                  centered: true,
+                  onOk: handleCancelBatchGenerate,
+                });
+              }}>
+                取消
+              </Button>
+            </div>
+          )}
+          {/* 单章节后台生成进度 */}
           {projectBgTasks.map(task => (
             <div key={task.id} style={{
               display: 'flex', alignItems: 'center', gap: 12,
@@ -2060,7 +2191,7 @@ export default function Chapters() {
               borderBottom: `1px solid ${token.colorBorderSecondary}`
             }}>
               <Tag color={task.status === 'running' ? 'processing' : 'default'}
-                  style={{ minWidth: 50, textAlign: 'center' }}>
+                  style={{ minWidth: 60, textAlign: 'center' }}>
                 {task.status === 'running' ? '生成中' : '排队中'}
               </Tag>
               <div style={{ flex: 1 }}>
@@ -3098,29 +3229,94 @@ export default function Chapters() {
         message={singleChapterProgressMessage}
       />
 
-      {/* 批量生成进度显示 - 使用统一的进度组件 */}
-      <SSEProgressModal
-        visible={batchGenerating}
-        progress={batchProgress ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}
-        message={
-          batchProgress?.current_chapter_number
-            ? `正在生成第 ${batchProgress.current_chapter_number} 章... (${batchProgress.completed}/${batchProgress.total})`
-            : `批量生成进行中... (${batchProgress?.completed || 0}/${batchProgress?.total || 0})`
+      {/* 后台任务列表 Modal */}
+      <Modal
+        title={
+          <Space>
+            <ClockCircleOutlined />
+            <span>后台任务</span>
+            {taskList.filter(t => t.status === 'running' || t.status === 'pending').length > 0 && (
+              <Badge count={taskList.filter(t => t.status === 'running' || t.status === 'pending').length} />
+            )}
+          </Space>
         }
-        title="批量生成章节"
-        onCancel={() => {
-          modal.confirm({
-            title: '确认取消',
-            content: '确定要取消批量生成吗？已生成的章节将保留。',
-            okText: '确定取消',
-            cancelText: '继续生成',
-            okButtonProps: { danger: true },
-            centered: true,
-            onOk: handleCancelBatchGenerate,
-          });
-        }}
-        cancelButtonText="取消任务"
-      />
+        open={taskListVisible}
+        onCancel={() => setTaskListVisible(false)}
+        width={isMobile ? '95%' : 700}
+        centered
+        footer={
+          <Space>
+            <Button icon={<SyncOutlined />} onClick={refreshTaskList} loading={taskListLoading}>
+              刷新
+            </Button>
+            <Button onClick={() => setTaskListVisible(false)}>
+              关闭
+            </Button>
+          </Space>
+        }
+      >
+        {taskListLoading && taskList.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <LoadingOutlined style={{ fontSize: 24 }} />
+            <div style={{ marginTop: 12, color: token.colorTextSecondary }}>加载中...</div>
+          </div>
+        ) : taskList.length === 0 ? (
+          <Empty description="暂无后台任务" />
+        ) : (
+          <List
+            dataSource={taskList}
+            renderItem={(task) => (
+              <List.Item
+                key={task.id}
+                actions={[
+                  ...(task.status === 'running' || task.status === 'pending'
+                    ? [<Button key="cancel" size="small" danger onClick={() => handleCancelBgTask(task.id)}>取消</Button>]
+                    : []
+                  ),
+                  ...(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+                    ? [<Button key="delete" size="small" type="link" danger onClick={() => handleDeleteBgTask(task.id)}>删除</Button>]
+                    : []
+                  ),
+                ].filter(Boolean)}
+              >
+                <List.Item.Meta
+                  title={
+                    <Space>
+                      {getTaskStatusTag(task.status)}
+                      <span>{getTaskTypeLabel(task.task_type)}</span>
+                      {task.status === 'running' || task.status === 'pending' ? (
+                        <Progress percent={task.progress} size="small" style={{ width: 120 }} />
+                      ) : null}
+                    </Space>
+                  }
+                  description={
+                    <div>
+                      <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
+                        {task.status_message || '无状态信息'}
+                      </div>
+                      <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 4 }}>
+                        创建: {task.created_at ? new Date(task.created_at).toLocaleString() : '-'}
+                        {task.completed_at && ' | 完成: ' + new Date(task.completed_at).toLocaleString()}
+                      </div>
+                      {task.error_message && (
+                        <div style={{ fontSize: 12, color: token.colorError, marginTop: 4 }}>
+                          {'❌ ' + task.error_message}
+                        </div>
+                      )}
+                      {task.task_result && task.status === 'completed' && (
+                        <div style={{ fontSize: 12, color: token.colorSuccess, marginTop: 4 }}>
+                          {'✅ ' + ((task.task_result as Record<string, unknown>).message as string || '任务完成')}
+                        </div>
+                      )}
+                    </div>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </Modal>
+
 
       {/* 章节阅读器 */}
       {readingChapter && (
