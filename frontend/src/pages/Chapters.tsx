@@ -1132,6 +1132,7 @@ export default function Chapters() {
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       'draft': 'default',
+      'pending': 'warning',
       'writing': 'processing',
       'completed': 'success',
     };
@@ -1141,6 +1142,7 @@ export default function Chapters() {
   const getStatusText = (status: string) => {
     const texts: Record<string, string> = {
       'draft': '草稿',
+      'pending': '待处理',
       'writing': '创作中',
       'completed': '已完成',
     };
@@ -1545,6 +1547,7 @@ export default function Chapters() {
           >
             <Select>
               <Select.Option value="draft">草稿</Select.Option>
+              <Select.Option value="pending">待处理</Select.Option>
               <Select.Option value="writing">创作中</Select.Option>
               <Select.Option value="completed">已完成</Select.Option>
             </Select>
@@ -2697,6 +2700,7 @@ export default function Chapters() {
           <Form.Item label="状态" name="status">
             <Select placeholder="选择状态">
               <Select.Option value="draft">草稿</Select.Option>
+              <Select.Option value="pending">待处理</Select.Option>
               <Select.Option value="writing">创作中</Select.Option>
               <Select.Option value="completed">已完成</Select.Option>
             </Select>
