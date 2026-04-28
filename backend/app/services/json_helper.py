@@ -26,15 +26,101 @@ _QUOTE_MAP = {
 }
 
 
+def _is_content_quote(text: str, pos: int) -> bool:
+    """
+    判断字符串值内的 '"' 是否为内容引号（需转义）而非 JSON 结束引号。
+    
+    合法 JSON 中，字符串结束引号之后的非空白字符必须是：
+    ',' (值分隔) / '}' (关闭对象) / ']' (关闭数组)
+    
+    如果 '"' 后面不符合这些模式，则是 AI 写入的内容引号，需要转义。
+    """
+    j = pos + 1
+    
+    # 跳过空格和制表符
+    while j < len(text) and text[j] in ' \t':
+        j += 1
+    
+    if j >= len(text):
+        return False  # 文本末尾，视为结束引号
+    
+    ch = text[j]
+    
+    # } 或 ] → 结束引号
+    if ch in ('}', ']'):
+        return False
+    
+    # 换行 → 检查下一行开头判断
+    if ch == '\n' or ch == '\r':
+        k = j + (2 if (ch == '\r' and j + 1 < len(text) and text[j + 1] == '\n') else 1)
+        while k < len(text) and text[k] in ' \t':
+            k += 1
+        if k >= len(text):
+            return False
+        # 下一行以 " (JSON key) 或 } 或 ] 开头 → 结束引号
+        if text[k] == '"' or text[k] in ('}', ']'):
+            return False
+        return True
+    
+    # , → 需要检查逗号后面是什么
+    if ch == ',':
+        k = j + 1
+        while k < len(text) and text[k] in ' \t':
+            k += 1
+        
+        if k >= len(text):
+            return False
+        
+        # 逗号后跟换行 → 检查下一行
+        if text[k] in ('\n', '\r'):
+            k2 = k + (2 if (text[k] == '\r' and k + 1 < len(text) and text[k + 1] == '\n') else 1)
+            while k2 < len(text) and text[k2] in ' \t\n\r':
+                k2 += 1
+            if k2 >= len(text):
+                return False
+            if text[k2] == '"' or text[k2] in ('}', ']'):
+                return False
+            return True
+        
+        after_comma = text[k]
+        
+        # 结构性逗号后应为 JSON 值的开头
+        if after_comma == '"':
+            return False  # 字符串值或 key
+        if after_comma.isdigit() or after_comma == '-':
+            return False  # 数字
+        if after_comma in ('{', '['):
+            return False  # 对象/数组
+        if text[k:k+4] in ('true', 'null'):
+            return False
+        if text[k:k+5] == 'false':
+            return False
+        
+        # 逗号后不是 JSON 值开头 → 内容逗号，引号是内容引号
+        return True
+    
+    # : → 通常在字符串结束后不可能出现，保守处理为结束引号
+    if ch == ':':
+        return False
+    
+    # 其他字符（中文、字母等）→ 内容引号
+    return True
+
+
 def _fix_json_string_values(text: str) -> str:
     """
-    修复JSON字符串值中的常见问题：
-    1. 裸换行符/制表符 → 转义
-    2. 字符串值内的中文引号 → 转义为ASCII引号（避免破坏JSON结构）
-    3. 结构位置的中文引号 → 直接替换为ASCII引号
+    上下文感知的 JSON 修复，区分字符串内外分别处理。
     
-    AI生成的JSON常在字符串值中插入未转义的换行符和中文引号。
-    此函数遍历文本，区分字符串内外，分别处理。
+    字符串值内：
+    1. 裸换行符/制表符 → 转义
+    2. 中文引号（""等） → 转义为 \\"
+    3. 未转义的 ASCII 双引号 → 智能检测：内容引号转义，结束引号保留
+    4. 中文逗号/冒号 → 保留原样（是内容字符）
+    
+    结构位置（字符串外）：
+    1. 中文引号 → ASCII 引号
+    2. 中文逗号 → ASCII 逗号
+    3. 中文冒号 → ASCII 冒号
     """
     if not text or '"' not in text:
         return text
@@ -47,107 +133,131 @@ def _fix_json_string_values(text: str) -> str:
     while i < len(text):
         c = text[i]
         
-        if c == '"' and not in_string:
-            # 进入字符串
-            in_string = True
+        # === 非字符串内（结构位置）===
+        if not in_string:
+            # 结构位置的中文标点 → ASCII
+            if c == '\uff0c':  # ，→ ,
+                result.append(',')
+                fixed_count += 1
+                i += 1
+                continue
+            if c == '\uff1a':  # ：→ :
+                result.append(':')
+                fixed_count += 1
+                i += 1
+                continue
+            if c in _QUOTE_MAP:
+                result.append(_QUOTE_MAP[c])
+                fixed_count += 1
+                i += 1
+                continue
+            
+            # ASCII 双引号 → 进入字符串
+            if c == '"':
+                in_string = True
+                result.append(c)
+                i += 1
+                continue
+            
             result.append(c)
             i += 1
             continue
         
-        if in_string:
-            if c == '\\':
-                # 转义字符，检查下一个字符是否合法
-                if i + 1 < len(text):
-                    next_c = text[i + 1]
-                    # JSON 合法转义：\" \\ \/ \b \f \n \r \t \uXXXX
-                    if next_c in ('"', '\\', '/', 'b', 'f', 'n', 'r', 't'):
-                        # 合法转义，直接保留
-                        result.append(c)
-                        result.append(next_c)
-                        i += 2
+        # === 字符串值内 ===
+        
+        # 转义字符处理
+        if c == '\\':
+            if i + 1 < len(text):
+                next_c = text[i + 1]
+                if next_c in ('"', '\\', '/', 'b', 'f', 'n', 'r', 't'):
+                    result.append(c)
+                    result.append(next_c)
+                    i += 2
+                    continue
+                elif next_c == 'u':
+                    if i + 5 < len(text) and all(text[i+2+k] in '0123456789abcdefABCDEF' for k in range(4)):
+                        result.append(text[i:i+6])
+                        i += 6
                         continue
-                    elif next_c == 'u':
-                        # Unicode 转义 \uXXXX，检查是否有4个十六进制字符
-                        if i + 5 < len(text) and all(text[i+2+k] in '0123456789abcdefABCDEF' for k in range(4)):
-                            result.append(text[i:i+6])
-                            i += 6
-                            continue
-                        else:
-                            # 不完整的unicode转义，去掉反斜杠
-                            result.append(next_c)
-                            fixed_count += 1
-                            i += 2
-                            continue
                     else:
-                        # 非法转义字符（如 \c \p \d 等），去掉反斜杠只保留字符
                         result.append(next_c)
                         fixed_count += 1
                         i += 2
                         continue
                 else:
-                    # 末尾孤立的反斜杠，去掉
+                    result.append(next_c)
                     fixed_count += 1
-                    i += 1
+                    i += 2
                     continue
-            
-            if c == '"':
-                # 字符串结束
+            else:
+                fixed_count += 1
+                i += 1
+                continue
+        
+        # ASCII 双引号 → 智能判断是结束引号还是内容引号
+        if c == '"':
+            if _is_content_quote(text, i):
+                # 内容引号，需要转义
+                result.append('\\')
+                result.append('"')
+                fixed_count += 1
+                i += 1
+                continue
+            else:
+                # 结束引号
                 in_string = False
                 result.append(c)
                 i += 1
                 continue
-            
-            if c == '\n':
-                # 裸换行符 → 替换为转义换行
-                result.append('\\')
-                result.append('n')
-                fixed_count += 1
-                i += 1
-                continue
-            
-            if c == '\r':
-                # 裸回车符 → 忽略或替换
-                if i + 1 < len(text) and text[i + 1] == '\n':
-                    result.append('\\')
-                    result.append('n')
-                    fixed_count += 1
-                    i += 2
-                else:
-                    result.append('\\')
-                    result.append('n')
-                    fixed_count += 1
-                    i += 1
-                continue
-            
-            if c == '\t':
-                # 裸制表符 → 替换为转义制表符
-                result.append('\\')
-                result.append('t')
-                fixed_count += 1
-                i += 1
-                continue
-            
-            # 字符串值内的中文引号 → 转义为 \"（避免破坏JSON结构）
-            if c in _QUOTE_MAP:
-                result.append('\\')
-                result.append(_QUOTE_MAP[c])
-                fixed_count += 1
-                i += 1
-                continue
         
-        # 非字符串内的字符
-        # 结构位置的中文引号 → 直接替换
-        if not in_string and c in _QUOTE_MAP:
-            result.append(_QUOTE_MAP[c])
+        # 裸换行符 → 转义
+        if c == '\n':
+            result.append('\\')
+            result.append('n')
             fixed_count += 1
             i += 1
             continue
         
+        if c == '\r':
+            if i + 1 < len(text) and text[i + 1] == '\n':
+                result.append('\\')
+                result.append('n')
+                fixed_count += 1
+                i += 2
+            else:
+                result.append('\\')
+                result.append('n')
+                fixed_count += 1
+                i += 1
+            continue
+        
+        if c == '\t':
+            result.append('\\')
+            result.append('t')
+            fixed_count += 1
+            i += 1
+            continue
+        
+        # 中文引号处理
+        if c in _QUOTE_MAP:
+            mapped = _QUOTE_MAP[c]
+            if mapped == '"':
+                # 中文双引号在字符串内需要转义
+                result.append('\\')
+                result.append('"')
+            else:
+                # 中文单引号在双引号字符串内不需要转义，直接替换
+                result.append(mapped)
+            fixed_count += 1
+            i += 1
+            continue
+        
+        # 其他字符（包括中文逗号、中文冒号）→ 保留原样
         result.append(c)
         i += 1
     
     if fixed_count > 0:
-        logger.debug(f"✅ 修复了{fixed_count}个JSON问题（裸控制字符/中文引号）")
+        logger.debug(f"✅ 修复了{fixed_count}个JSON问题（引号/控制字符/中文标点）")
     
     return ''.join(result)
 
@@ -261,11 +371,8 @@ def clean_json_response(text: str) -> str:
         original_length = len(text)
         logger.debug(f"🔍 开始清洗JSON，原始长度: {original_length}")
         
-        # 替换中文逗号/冒号（AI可能在JSON结构位置使用，全局替换是安全的）
-        text = text.replace('\uff0c', ',')   # ，→ ,
-        text = text.replace('\uff1a', ':')   # ：→ :
-        
-        # 修复JSON中的中文引号和裸控制字符（上下文感知，区分字符串内外）
+        # 上下文感知修复：中文引号/逗号/冒号、裸控制字符、未转义的内容引号
+        # （区分字符串内外：结构位置替换为ASCII，字符串内保留或转义）
         text = _fix_json_string_values(text)
         
         # 去除 markdown 代码块
