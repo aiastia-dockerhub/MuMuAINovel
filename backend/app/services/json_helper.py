@@ -209,6 +209,48 @@ def _fix_all_invalid_escapes(text: str) -> str:
     return ''.join(result)
 
 
+def _fix_multiple_objects_as_value(text: str) -> str:
+    """
+    修复AI生成的JSON中，多个对象作为属性值但未合并的问题。
+    
+    示例：
+        "key": {"a": "1"}, {"b": "2"}  →  "key": {"a": "1", "b": "2"}
+    
+    AI有时在输出对象类型的属性值时，输出了多个独立的对象而不是合并为一个。
+    例如 relationship_changes 字段输出多个角色关系变化时可能出现此问题。
+    此函数检测并合并这些对象。
+    """
+    if '{' not in text or '}' not in text:
+        return text
+    
+    # 匹配嵌套层级不超过2的对象: { ... } 其中 ... 不含 { 或仅含单层嵌套
+    nested_obj = r'\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}'
+    
+    # 模式：属性冒号后跟一个对象，然后逗号和另一个对象（没有属性名）
+    # 即 "key": {obj1}, {obj2} → "key": {obj1, obj2}
+    pattern = r'(":)\s*(' + nested_obj + r')\s*,\s*(' + nested_obj + r')'
+    
+    def merge_objects(match):
+        colon = match.group(1)
+        obj1_content = match.group(2)[1:-1]  # 去掉外层的 { }
+        obj2_content = match.group(3)[1:-1]  # 去掉外层的 { }
+        # 合并为一个对象
+        return f'{colon} {{{obj1_content}, {obj2_content}}}'
+    
+    prev = None
+    count = 0
+    max_iterations = 10
+    while prev != text and count < max_iterations:
+        prev = text
+        text = re.sub(pattern, merge_objects, text)
+        count += 1
+    
+    if count > 1:
+        logger.info(f"✅ 修复了{count - 1}处多对象属性值合并")
+    
+    return text
+
+
 def clean_json_response(text: str) -> str:
     """清洗 AI 返回的 JSON（改进版 - 流式安全）"""
     try:
@@ -343,16 +385,35 @@ def clean_json_response(text: str) -> str:
             json.loads(result)
             logger.debug(f"✅ 清洗后JSON验证成功")
         except json.JSONDecodeError as e:
-            logger.warning(f"⚠️ 清洗后JSON仍然无效: {e}，尝试兜底修复无效转义...")
-            # 兜底修复：扫描所有无效转义序列（不依赖字符串边界追踪）
+            logger.warning(f"⚠️ 清洗后JSON仍然无效: {e}，尝试修复结构性问题...")
+            
+            # 修复1：合并多对象属性值（AI可能输出 "key": {a:1}, {b:2} ）
+            result = _fix_multiple_objects_as_value(result)
+            
+            try:
+                json.loads(result)
+                logger.info(f"✅ 修复多对象属性值后JSON验证成功")
+            except json.JSONDecodeError:
+                pass  # 继续尝试其他修复
+            else:
+                return result
+            
+            # 修复2：兜底修复无效转义序列（不依赖字符串边界追踪）
+            logger.warning(f"⚠️ 继续尝试兜底修复无效转义...")
             result = _fix_all_invalid_escapes(result)
             try:
                 json.loads(result)
                 logger.info(f"✅ 兜底修复后JSON验证成功")
             except json.JSONDecodeError as e2:
-                logger.error(f"❌ 兜底修复后JSON仍然无效: {e2}")
-                logger.debug(f"   结果预览: {result[:500]}")
-                logger.debug(f"   结果结尾: ...{result[-200:]}")
+                # 修复3：再次尝试合并多对象属性值（转义修复后可能产生新的合并机会）
+                result = _fix_multiple_objects_as_value(result)
+                try:
+                    json.loads(result)
+                    logger.info(f"✅ 二次修复后JSON验证成功")
+                except json.JSONDecodeError as e3:
+                    logger.error(f"❌ 所有修复后JSON仍然无效: {e3}")
+                    logger.debug(f"   结果预览: {result[:500]}")
+                    logger.debug(f"   结果结尾: ...{result[-200:]}")
         
         return result
         
