@@ -160,6 +160,44 @@ async def get_user_ai_service(
     )
 
 
+async def get_user_ai_service_from_db(user_id: str, db: AsyncSession) -> AIService:
+    """
+    从数据库直接创建用户AI服务实例（用于后台任务，不依赖FastAPI的Depends）
+    """
+    from app.models.mcp_plugin import MCPPlugin
+
+    result = await db.execute(
+        select(Settings).where(Settings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        env_defaults = read_env_defaults()
+        settings = Settings(user_id=user_id, **env_defaults)
+        db.add(settings)
+        await db.commit()
+        await db.refresh(settings)
+
+    mcp_result = await db.execute(
+        select(MCPPlugin).where(MCPPlugin.user_id == user_id)
+    )
+    mcp_plugins = mcp_result.scalars().all()
+    enable_mcp = any(plugin.enabled for plugin in mcp_plugins) if mcp_plugins else False
+
+    return create_user_ai_service_with_mcp(
+        api_provider=settings.api_provider,
+        api_key=settings.api_key,
+        api_base_url=settings.api_base_url or "",
+        model_name=settings.llm_model,
+        temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+        user_id=user_id,
+        db_session=db,
+        system_prompt=settings.system_prompt,
+        enable_mcp=enable_mcp,
+    )
+
+
 @router.get("", response_model=SettingsResponse)
 async def get_settings(
     user: User = Depends(require_login),

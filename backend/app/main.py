@@ -29,7 +29,21 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 注册MCP状态同步服务
     register_status_sync()
-    
+
+    # 安全保障：确保后台任务表存在（兼容未执行Alembic迁移的旧部署）
+    try:
+        from app.database import get_engine
+        from app.models.background_task import BackgroundTask
+        _startup_engine = await get_engine("system")
+        async with _startup_engine.begin() as conn:
+            # 仅创建 background_tasks 表（如果不存在），不影响其他表
+            await conn.run_sync(
+                lambda sync_conn: BackgroundTask.__table__.create(sync_conn, checkfirst=True)
+            )
+        logger.info("后台任务表检查完成")
+    except Exception as e:
+        logger.warning(f"后台任务表检查失败（不影响启动）: {e}")
+
     logger.info("应用启动完成")
     
     yield
@@ -133,7 +147,7 @@ from app.api import (
     auth, users, settings, writing_styles, memories,
     mcp_plugins, admin, inspiration, prompt_templates,
     changelog, careers, foreshadows, prompt_workshop, book_import,
-    project_covers
+    project_covers, tasks
 )
 
 app.include_router(auth.router, prefix="/api")
@@ -159,6 +173,7 @@ app.include_router(prompt_templates.router, prefix="/api")  # 提示词模板管
 app.include_router(changelog.router, prefix="/api")  # 更新日志API
 app.include_router(prompt_workshop.router, prefix="/api")  # 提示词工坊API
 app.include_router(book_import.router, prefix="/api")  # 拆书导入API
+app.include_router(tasks.router, prefix="/api")  # 后台任务API
 
 static_dir = Path(__file__).parent.parent / "static"
 generated_assets_root_dir = Path(__file__).parent.parent / "storage"

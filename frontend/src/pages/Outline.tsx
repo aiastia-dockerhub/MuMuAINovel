@@ -1,10 +1,11 @@
-﻿import { useState, useEffect, useMemo } from 'react';
-import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs, Pagination, theme } from 'antd';
-import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
+﻿import { useState, useEffect, useMemo, useRef } from 'react';
+import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs, Pagination, theme, Progress, Badge, Tooltip } from 'antd';
+import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined, ClockCircleOutlined, ReloadOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useOutlineSync } from '../store/hooks';
 import { SSEPostClient } from '../utils/sseClient';
 import { SSEProgressModal } from '../components/SSEProgressModal';
+import { generateOutlineBackground, getProjectTasks, cancelTask, deleteTask, type TaskStatus } from '../services/backgroundTaskService';
 import { outlineApi, chapterApi, projectApi, characterApi } from '../services/api';
 import type { OutlineExpansionResponse, BatchOutlineExpansionResponse, ChapterPlanItem, ApiError, Character } from '../types';
 
@@ -153,6 +154,14 @@ export default function Outline() {
   const [sseProgress, setSSEProgress] = useState(0);
   const [sseMessage, setSSEMessage] = useState('');
   const [sseModalVisible, setSSEModalVisible] = useState(false);
+
+  // 后台任务取消函数引用
+  const cancelGenerateRef = useRef<(() => void) | null>(null);
+
+  // 后台任务列表状态
+  const [taskListVisible, setTaskListVisible] = useState(false);
+  const [taskList, setTaskList] = useState<TaskStatus[]>([]);
+  const [taskListLoading, setTaskListLoading] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -573,33 +582,31 @@ export default function Outline() {
       console.log('6. 最终请求数据:', JSON.stringify(requestData, null, 2));
       console.log('=========================');
 
-      // 使用SSE客户端
-      const apiUrl = `/api/outlines/generate-stream`;
-      const client = new SSEPostClient(apiUrl, requestData, {
-        onProgress: (msg: string, progress: number) => {
-          setSSEMessage(msg);
-          setSSEProgress(progress);
+      // 使用后台任务生成（不怕断连，关闭浏览器也继续运行）
+      setSSEMessage('正在创建后台任务...');
+
+      const cancelFn = await generateOutlineBackground(
+        requestData,
+        (status) => {
+          setSSEProgress(status.progress);
+          setSSEMessage(status.status_message || '处理中...');
         },
-        onResult: (data: unknown) => {
-          console.log('生成完成，结果:', data);
+        (result) => {
+          message.success(result.task_result?.message as string || '大纲生成完成！');
+          setSSEModalVisible(false);
+          setIsGenerating(false);
+          cancelGenerateRef.current = null;
+          refreshOutlines();
         },
-        onError: (error: string) => {
-          // 现在只处理真正的错误
+        (error) => {
           message.error(`生成失败: ${error}`);
           setSSEModalVisible(false);
           setIsGenerating(false);
-        },
-        onComplete: () => {
-          message.success('大纲生成完成！');
-          setSSEModalVisible(false);
-          setIsGenerating(false);
-          // 刷新大纲列表
-          refreshOutlines();
+          cancelGenerateRef.current = null;
         }
-      });
+      );
 
-      // 开始连接
-      client.connect();
+      cancelGenerateRef.current = cancelFn;
 
     } catch (error) {
       console.error('AI生成失败:', error);
@@ -1895,8 +1902,168 @@ export default function Outline() {
   };
 
 
+  // 加载并显示后台任务列表
+  const showTaskListModal = async () => {
+    if (!currentProject?.id) return;
+    setTaskListVisible(true);
+    setTaskListLoading(true);
+    try {
+      const result = await getProjectTasks(currentProject.id);
+      setTaskList(result.items || []);
+    } catch (error) {
+      message.error('加载任务列表失败');
+    } finally {
+      setTaskListLoading(false);
+    }
+  };
+
+  // 刷新任务列表
+  const refreshTaskList = async () => {
+    if (!currentProject?.id) return;
+    setTaskListLoading(true);
+    try {
+      const result = await getProjectTasks(currentProject.id);
+      setTaskList(result.items || []);
+    } catch (error) {
+      console.error('刷新任务列表失败:', error);
+    } finally {
+      setTaskListLoading(false);
+    }
+  };
+
+  // 获取任务状态标签
+  const getTaskStatusTag = (status: TaskStatus['status']) => {
+    switch (status) {
+      case 'pending': return <Tag icon={<ClockCircleOutlined />} color="default">等待中</Tag>;
+      case 'running': return <Tag icon={<LoadingOutlined />} color="processing">运行中</Tag>;
+      case 'completed': return <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>;
+      case 'failed': return <Tag icon={<CloseCircleOutlined />} color="error">失败</Tag>;
+      case 'cancelled': return <Tag icon={<CloseCircleOutlined />} color="default">已取消</Tag>;
+      default: return <Tag>{status}</Tag>;
+    }
+  };
+
+  // 获取任务类型标签
+  const getTaskTypeLabel = (taskType: string) => {
+    switch (taskType) {
+      case 'outline_new': return '大纲生成';
+      case 'outline_continue': return '大纲续写';
+      default: return taskType;
+    }
+  };
+
+  // 处理取消后台任务
+  const handleCancelTask = async (taskId: string) => {
+    try {
+      await cancelTask(taskId);
+      message.success('任务已取消');
+      refreshTaskList();
+    } catch (error) {
+      message.error('取消任务失败');
+    }
+  };
+
+  // 处理删除任务记录
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await deleteTask(taskId);
+      message.success('任务记录已删除');
+      refreshTaskList();
+    } catch (error) {
+      message.error('删除任务记录失败');
+    }
+  };
+
   return (
     <>
+      {/* 后台任务列表 Modal */}
+      <Modal
+        title={
+          <Space>
+            <ClockCircleOutlined />
+            <span>后台任务</span>
+            {taskList.filter(t => t.status === 'running' || t.status === 'pending').length > 0 && (
+              <Badge count={taskList.filter(t => t.status === 'running' || t.status === 'pending').length} />
+            )}
+          </Space>
+        }
+        open={taskListVisible}
+        onCancel={() => setTaskListVisible(false)}
+        width={isMobile ? '95%' : 700}
+        centered
+        footer={
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={refreshTaskList} loading={taskListLoading}>
+              刷新
+            </Button>
+            <Button onClick={() => setTaskListVisible(false)}>
+              关闭
+            </Button>
+          </Space>
+        }
+      >
+        {taskListLoading && taskList.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <LoadingOutlined style={{ fontSize: 24 }} />
+            <div style={{ marginTop: 12, color: token.colorTextSecondary }}>加载中...</div>
+          </div>
+        ) : taskList.length === 0 ? (
+          <Empty description="暂无后台任务" />
+        ) : (
+          <List
+            dataSource={taskList}
+            renderItem={(task) => (
+              <List.Item
+                key={task.id}
+                actions={[
+                  ...(task.status === 'running' || task.status === 'pending'
+                    ? [<Button key="cancel" size="small" danger onClick={() => handleCancelTask(task.id)}>取消</Button>]
+                    : []
+                  ),
+                  ...(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+                    ? [<Button key="delete" size="small" type="link" danger onClick={() => handleDeleteTask(task.id)}>删除</Button>]
+                    : []
+                  ),
+                ].filter(Boolean)}
+              >
+                <List.Item.Meta
+                  title={
+                    <Space>
+                      {getTaskStatusTag(task.status)}
+                      <span>{getTaskTypeLabel(task.task_type)}</span>
+                      {task.status === 'running' || task.status === 'pending' ? (
+                        <Progress percent={task.progress} size="small" style={{ width: 120 }} />
+                      ) : null}
+                    </Space>
+                  }
+                  description={
+                    <div>
+                      <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
+                        {task.status_message || '无状态信息'}
+                      </div>
+                      <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 4 }}>
+                        创建: {task.created_at ? new Date(task.created_at).toLocaleString() : '-'}
+                        {task.completed_at && ` | 完成: ${new Date(task.completed_at).toLocaleString()}`}
+                      </div>
+                      {task.error_message && (
+                        <div style={{ fontSize: 12, color: token.colorError, marginTop: 4 }}>
+                          ❌ {task.error_message}
+                        </div>
+                      )}
+                      {task.task_result && task.status === 'completed' && (
+                        <div style={{ fontSize: 12, color: token.colorSuccess, marginTop: 4 }}>
+                          ✅ {(task.task_result as Record<string, unknown>).message as string || '任务完成'}
+                        </div>
+                      )}
+                    </div>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </Modal>
+
       {/* 批量展开预览 Modal */}
       <Modal
         title={
@@ -1923,7 +2090,16 @@ export default function Outline() {
         visible={sseModalVisible}
         progress={sseProgress}
         message={sseMessage}
-        title="AI生成中..."
+        title="AI生成中（后台运行，可关闭页面）..."
+        onCancel={() => {
+          if (cancelGenerateRef.current) {
+            cancelGenerateRef.current();
+            cancelGenerateRef.current = null;
+          }
+          setSSEModalVisible(false);
+          setIsGenerating(false);
+          message.info('已取消生成任务');
+        }}
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1977,6 +2153,15 @@ export default function Outline() {
             >
               {isMobile ? 'AI生成/续写' : 'AI生成/续写大纲'}
             </Button>
+            <Tooltip title="查看后台任务进度">
+              <Button
+                icon={<ClockCircleOutlined />}
+                onClick={showTaskListModal}
+                block={isMobile}
+              >
+                {isMobile ? '任务' : '后台任务'}
+              </Button>
+            </Tooltip>
             {outlines.length > 0 && currentProject?.outline_mode === 'one-to-many' && (
               <Button
                 icon={<AppstoreAddOutlined />}

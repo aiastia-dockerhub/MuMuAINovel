@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, Pagination, theme } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
+import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Progress, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, Pagination, theme } from 'antd';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined, ClockCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
+import { generateChapterBackground, getProjectTasks, cancelTask, deleteTask, type TaskStatus as BgTaskStatus } from '../services/backgroundTaskService';
 import { projectApi, writingStyleApi, chapterApi } from '../services/api';
 import type { Chapter, ChapterUpdate, ApiError, WritingStyle, AnalysisTask, ExpansionPlanData } from '../types';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import ChapterAnalysis from '../components/ChapterAnalysis';
 import ExpansionPlanEditor from '../components/ExpansionPlanEditor';
 import { SSELoadingOverlay } from '../components/SSELoadingOverlay';
-import { SSEProgressModal } from '../components/SSEProgressModal';
 import ChapterReader from '../components/ChapterReader';
 import PartialRegenerateToolbar from '../components/PartialRegenerateToolbar';
 import PartialRegenerateModal from '../components/PartialRegenerateModal';
@@ -96,6 +96,112 @@ export default function Chapters() {
   // 单章节生成进度状态
   const [singleChapterProgress, setSingleChapterProgress] = useState(0);
   const [singleChapterProgressMessage, setSingleChapterProgressMessage] = useState('');
+
+  // 后台生成任务状态
+  const [bgTaskVisible, setBgTaskVisible] = useState(false);
+  const [bgTaskProgress, setBgTaskProgress] = useState(0);
+  const [bgTaskMessage, setBgTaskMessage] = useState('');
+  const [bgTaskRunning, setBgTaskRunning] = useState(false);
+  const bgTaskCancelRef = useRef<(() => void) | null>(null);
+  const [projectBgTasks, setProjectBgTasks] = useState<BgTaskStatus[]>([]);
+  const bgPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 后台任务列表 Modal 状态
+  const [taskListVisible, setTaskListVisible] = useState(false);
+  const [taskList, setTaskList] = useState<BgTaskStatus[]>([]);
+  const [taskListLoading, setTaskListLoading] = useState(false);
+
+  // 轮询项目后台任务
+  useEffect(() => {
+    if (!currentProject) return;
+    const pollBgTasks = async () => {
+      try {
+        const resp = await getProjectTasks(currentProject.id, 'chapter_generate', 10);
+        const active = resp.items.filter(t => t.status === 'pending' || t.status === 'running');
+        setProjectBgTasks(active);
+        // 如果有活跃任务，继续轮询
+        if (active.length > 0) {
+          bgPollTimerRef.current = setTimeout(pollBgTasks, 3000);
+        }
+      } catch {}
+    };
+    pollBgTasks();
+    return () => { if (bgPollTimerRef.current) clearTimeout(bgPollTimerRef.current); };
+  }, [currentProject]);
+
+  // 加载并显示后台任务列表
+  const showTaskListModal = async () => {
+    if (!currentProject?.id) return;
+    setTaskListVisible(true);
+    setTaskListLoading(true);
+    try {
+      const result = await getProjectTasks(currentProject.id);
+      setTaskList(result.items || []);
+    } catch (error) {
+      message.error('加载任务列表失败');
+    } finally {
+      setTaskListLoading(false);
+    }
+  };
+
+  // 刷新任务列表
+  const refreshTaskList = async () => {
+    if (!currentProject?.id) return;
+    setTaskListLoading(true);
+    try {
+      const result = await getProjectTasks(currentProject.id);
+      setTaskList(result.items || []);
+      const active = (result.items || []).filter(t => t.status === 'pending' || t.status === 'running');
+      setProjectBgTasks(active);
+    } catch (error) {
+      console.error('刷新任务列表失败:', error);
+    } finally {
+      setTaskListLoading(false);
+    }
+  };
+
+  // 获取任务状态标签
+  const getTaskStatusTag = (status: BgTaskStatus['status']) => {
+    switch (status) {
+      case 'pending': return <Tag icon={<ClockCircleOutlined />} color="default">等待中</Tag>;
+      case 'running': return <Tag icon={<LoadingOutlined />} color="processing">运行中</Tag>;
+      case 'completed': return <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>;
+      case 'failed': return <Tag icon={<CloseCircleOutlined />} color="error">失败</Tag>;
+      case 'cancelled': return <Tag icon={<CloseCircleOutlined />} color="default">已取消</Tag>;
+      default: return <Tag>{status}</Tag>;
+    }
+  };
+
+  // 获取任务类型标签
+  const getTaskTypeLabel = (taskType: string) => {
+    switch (taskType) {
+      case 'chapter_generate': return '章节生成';
+      case 'outline_new': return '大纲生成';
+      case 'outline_continue': return '大纲续写';
+      default: return taskType;
+    }
+  };
+
+  // 处理取消后台任务
+  const handleCancelBgTask = async (taskId: string) => {
+    try {
+      await cancelTask(taskId);
+      message.success('任务已取消');
+      refreshTaskList();
+    } catch (error) {
+      message.error('取消任务失败');
+    }
+  };
+
+  // 处理删除任务记录
+  const handleDeleteBgTask = async (taskId: string) => {
+    try {
+      await deleteTask(taskId);
+      message.success('任务记录已删除');
+      refreshTaskList();
+    } catch (error) {
+      message.error('删除任务记录失败');
+    }
+  };
 
   // 批量生成相关状态
   const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
@@ -523,7 +629,7 @@ export default function Chapters() {
       if (data.has_active_task && data.task) {
         const task = data.task;
 
-        // 恢复任务状态
+        // 恢复任务状态（只在顶部进度条显示，不弹出Modal）
         setBatchTaskId(task.batch_id);
         setBatchProgress({
           status: task.status,
@@ -532,12 +638,12 @@ export default function Chapters() {
           current_chapter_number: task.current_chapter_number,
         });
         setBatchGenerating(true);
-        setBatchGenerateVisible(true);
+        // 不设置 setBatchGenerateVisible(true)，避免弹出Modal遮挡页面
 
         // 启动轮询
         startBatchPolling(task.batch_id);
 
-        message.info('检测到未完成的批量生成任务，已自动恢复');
+        message.info('检测到未完成的批量生成任务，已在顶部显示进度');
       }
     } catch (error) {
       console.error('检查批量生成任务失败:', error);
@@ -971,9 +1077,62 @@ export default function Chapters() {
     });
   };
 
+
+  // 后台生成章节（关闭浏览器也不影响）
+  const handleBackgroundGenerate = async () => {
+    if (!editingId) return;
+    if (!selectedStyleId) {
+      message.error("请先选择写作风格");
+      return;
+    }
+
+    try {
+      setBgTaskVisible(true);
+      setBgTaskRunning(true);
+      setBgTaskProgress(0);
+      setBgTaskMessage("正在创建后台任务...");
+
+      const cancelFn = await generateChapterBackground(
+        editingId,
+        {
+          style_id: selectedStyleId,
+          target_word_count: targetWordCount,
+          model: selectedModel,
+          narrative_perspective: temporaryNarrativePerspective,
+        },
+        (status) => {
+          setBgTaskProgress(status.progress || 0);
+          setBgTaskMessage(status.status_message || "处理中...");
+        },
+        (_) => {
+          setBgTaskProgress(100);
+          setBgTaskMessage("生成完成！");
+          setBgTaskRunning(false);
+          message.success("后台章节生成完成！");
+          refreshChapters();
+          if (currentProject) {
+            projectApi.getProject(currentProject.id).then(setCurrentProject).catch(console.error);
+          }
+          loadAnalysisTasks();
+        },
+        (error) => {
+          setBgTaskRunning(false);
+          setBgTaskMessage("失败: " + error);
+          message.error("后台生成失败: " + error);
+        }
+      );
+
+      bgTaskCancelRef.current = cancelFn;
+      message.info("已提交后台生成任务，可以关闭此页面");
+    } catch (error) {
+      message.error("创建后台任务失败");
+      setBgTaskRunning(false);
+    }
+  };
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       'draft': 'default',
+      'pending': 'warning',
       'writing': 'processing',
       'completed': 'success',
     };
@@ -983,6 +1142,7 @@ export default function Chapters() {
   const getStatusText = (status: string) => {
     const texts: Record<string, string> = {
       'draft': '草稿',
+      'pending': '待处理',
       'writing': '创作中',
       'completed': '已完成',
     };
@@ -1387,6 +1547,7 @@ export default function Chapters() {
           >
             <Select>
               <Select.Option value="draft">草稿</Select.Option>
+              <Select.Option value="pending">待处理</Select.Option>
               <Select.Option value="writing">创作中</Select.Option>
               <Select.Option value="completed">已完成</Select.Option>
             </Select>
@@ -1932,6 +2093,13 @@ export default function Chapters() {
             一键分析{batchAnalyzableChapterCount > 0 ? ` (${batchAnalyzableChapterCount})` : ''}
           </Button>
           <Button
+            icon={<ClockCircleOutlined />}
+            onClick={showTaskListModal}
+          >
+            后台任务
+            {projectBgTasks.length > 0 && <Badge count={projectBgTasks.length} size="small" style={{ marginLeft: 4 }} />}
+          </Button>
+          <Button
             type="primary"
             icon={<RocketOutlined />}
             onClick={handleOpenBatchGenerate}
@@ -1954,6 +2122,103 @@ export default function Chapters() {
           </Button>
         </Space>
       </div>
+
+      {/* 后台生成任务进度 */}
+      {(projectBgTasks.length > 0 || (batchGenerating && batchProgress)) && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 16px',
+          background: token.colorInfoBg,
+          borderRadius: token.borderRadius,
+          border: `1px solid ${token.colorInfoBorder}`
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <RocketOutlined style={{ color: token.colorInfo }} spin />
+            <span style={{ fontWeight: 600, color: token.colorInfo }}>
+              后台生成任务
+            </span>
+            <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+              关闭浏览器也不影响，完成后自动保存
+            </span>
+          </div>
+          {/* 批量生成进度 */}
+          {batchGenerating && batchProgress && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '8px 0',
+              borderBottom: `1px solid ${token.colorBorderSecondary}`
+            }}>
+              <Tag color="processing" style={{ minWidth: 60, textAlign: 'center' }}>
+                批量生成
+              </Tag>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, marginBottom: 4, color: token.colorText }}>
+                  {batchProgress.current_chapter_number
+                    ? `正在生成第 ${batchProgress.current_chapter_number} 章`
+                    : '批量生成中...'} ({batchProgress.completed}/{batchProgress.total})
+                </div>
+                <div style={{
+                  background: token.colorBgLayout, borderRadius: 4,
+                  height: 8, overflow: 'hidden'
+                }}>
+                  <div style={{
+                    background: token.colorInfo, height: '100%',
+                    width: (batchProgress.total > 0 ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0) + '%',
+                    transition: 'width 0.3s'
+                  }} />
+                </div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: token.colorInfo, minWidth: 40, textAlign: 'right' }}>
+                {batchProgress.total > 0 ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}%
+              </span>
+              <Button size="small" danger onClick={() => {
+                modal.confirm({
+                  title: '确认取消',
+                  content: '确定要取消批量生成吗？已生成的章节将保留。',
+                  okText: '确定取消',
+                  cancelText: '继续生成',
+                  okButtonProps: { danger: true },
+                  centered: true,
+                  onOk: handleCancelBatchGenerate,
+                });
+              }}>
+                取消
+              </Button>
+            </div>
+          )}
+          {/* 单章节后台生成进度 */}
+          {projectBgTasks.map(task => (
+            <div key={task.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '6px 0',
+              borderBottom: `1px solid ${token.colorBorderSecondary}`
+            }}>
+              <Tag color={task.status === 'running' ? 'processing' : 'default'}
+                  style={{ minWidth: 60, textAlign: 'center' }}>
+                {task.status === 'running' ? '生成中' : '排队中'}
+              </Tag>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  background: token.colorBgLayout, borderRadius: 4,
+                  height: 6, overflow: 'hidden'
+                }}>
+                  <div style={{
+                    background: token.colorInfo, height: '100%',
+                    width: (task.progress || 0) + '%',
+                    transition: 'width 0.3s'
+                  }} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: token.colorTextSecondary, minWidth: 40, textAlign: 'right' }}>
+                {task.progress || 0}%
+              </span>
+              <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+                {task.status_message || ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {chapters.length === 0 ? (
@@ -2435,6 +2700,7 @@ export default function Chapters() {
           <Form.Item label="状态" name="status">
             <Select placeholder="选择状态">
               <Select.Option value="draft">草稿</Select.Option>
+              <Select.Option value="pending">待处理</Select.Option>
               <Select.Option value="writing">创作中</Select.Option>
               <Select.Option value="completed">已完成</Select.Option>
             </Select>
@@ -2497,22 +2763,55 @@ export default function Chapters() {
                 const disabledReason = currentChapter ? getGenerateDisabledReason(currentChapter) : '';
 
                 return (
+                  <>
                   <Button
                     type="primary"
                     icon={canGenerate ? <ThunderboltOutlined /> : <LockOutlined />}
                     onClick={() => currentChapter && showGenerateModal(currentChapter)}
                     loading={isContinuing}
-                    disabled={!canGenerate}
+                    disabled={!canGenerate || bgTaskRunning}
                     danger={!canGenerate}
                     style={{ fontWeight: 'bold' }}
-                    title={!canGenerate ? disabledReason : '根据大纲和前置章节内容创作'}
+                    title={!canGenerate ? disabledReason : '根据大纲和前置章节内容创作（流式）'}
                   >
                     {isMobile ? 'AI' : 'AI创作'}
                   </Button>
+                  <Button
+                    icon={<RocketOutlined />}
+                    onClick={handleBackgroundGenerate}
+                    disabled={!canGenerate || bgTaskRunning || isContinuing}
+                    loading={bgTaskRunning}
+                    style={{ fontWeight: 'bold' }}
+                    title={!canGenerate ? disabledReason : '后台生成：关闭浏览器也不影响，完成后自动保存'}
+                  >
+                    {isMobile ? '后台' : '后台生成'}
+                  </Button>
+                  </>
                 );
               })()}
             </Space.Compact>
           </Form.Item>
+
+          {/* 后台生成进度 */}
+          {bgTaskVisible && (
+            <Alert
+              message={bgTaskRunning ? '后台生成进行中...' : '后台生成完成'}
+              description={
+                <div>
+                  <div style={{ marginBottom: 8 }}>{bgTaskMessage}</div>
+                  <div style={{ background: '#f0f0f0', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                    <div style={{ background: '#1890ff', height: '100%', width: bgTaskProgress + '%', transition: 'width 0.3s' }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{bgTaskProgress}%</div>
+                </div>
+              }
+              type={bgTaskRunning ? 'info' : (bgTaskProgress >= 100 ? 'success' : 'error')}
+              showIcon
+              style={{ marginBottom: 12 }}
+              closable={!bgTaskRunning}
+              onClose={() => setBgTaskVisible(false)}
+            />
+          )}
 
           {/* 第一行：写作风格 + 叙事角度 */}
           <div style={{
@@ -2934,29 +3233,94 @@ export default function Chapters() {
         message={singleChapterProgressMessage}
       />
 
-      {/* 批量生成进度显示 - 使用统一的进度组件 */}
-      <SSEProgressModal
-        visible={batchGenerating}
-        progress={batchProgress ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}
-        message={
-          batchProgress?.current_chapter_number
-            ? `正在生成第 ${batchProgress.current_chapter_number} 章... (${batchProgress.completed}/${batchProgress.total})`
-            : `批量生成进行中... (${batchProgress?.completed || 0}/${batchProgress?.total || 0})`
+      {/* 后台任务列表 Modal */}
+      <Modal
+        title={
+          <Space>
+            <ClockCircleOutlined />
+            <span>后台任务</span>
+            {taskList.filter(t => t.status === 'running' || t.status === 'pending').length > 0 && (
+              <Badge count={taskList.filter(t => t.status === 'running' || t.status === 'pending').length} />
+            )}
+          </Space>
         }
-        title="批量生成章节"
-        onCancel={() => {
-          modal.confirm({
-            title: '确认取消',
-            content: '确定要取消批量生成吗？已生成的章节将保留。',
-            okText: '确定取消',
-            cancelText: '继续生成',
-            okButtonProps: { danger: true },
-            centered: true,
-            onOk: handleCancelBatchGenerate,
-          });
-        }}
-        cancelButtonText="取消任务"
-      />
+        open={taskListVisible}
+        onCancel={() => setTaskListVisible(false)}
+        width={isMobile ? '95%' : 700}
+        centered
+        footer={
+          <Space>
+            <Button icon={<SyncOutlined />} onClick={refreshTaskList} loading={taskListLoading}>
+              刷新
+            </Button>
+            <Button onClick={() => setTaskListVisible(false)}>
+              关闭
+            </Button>
+          </Space>
+        }
+      >
+        {taskListLoading && taskList.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <LoadingOutlined style={{ fontSize: 24 }} />
+            <div style={{ marginTop: 12, color: token.colorTextSecondary }}>加载中...</div>
+          </div>
+        ) : taskList.length === 0 ? (
+          <Empty description="暂无后台任务" />
+        ) : (
+          <List
+            dataSource={taskList}
+            renderItem={(task) => (
+              <List.Item
+                key={task.id}
+                actions={[
+                  ...(task.status === 'running' || task.status === 'pending'
+                    ? [<Button key="cancel" size="small" danger onClick={() => handleCancelBgTask(task.id)}>取消</Button>]
+                    : []
+                  ),
+                  ...(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+                    ? [<Button key="delete" size="small" type="link" danger onClick={() => handleDeleteBgTask(task.id)}>删除</Button>]
+                    : []
+                  ),
+                ].filter(Boolean)}
+              >
+                <List.Item.Meta
+                  title={
+                    <Space>
+                      {getTaskStatusTag(task.status)}
+                      <span>{getTaskTypeLabel(task.task_type)}</span>
+                      {task.status === 'running' || task.status === 'pending' ? (
+                        <Progress percent={task.progress} size="small" style={{ width: 120 }} />
+                      ) : null}
+                    </Space>
+                  }
+                  description={
+                    <div>
+                      <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
+                        {task.status_message || '无状态信息'}
+                      </div>
+                      <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 4 }}>
+                        创建: {task.created_at ? new Date(task.created_at).toLocaleString() : '-'}
+                        {task.completed_at && ' | 完成: ' + new Date(task.completed_at).toLocaleString()}
+                      </div>
+                      {task.error_message && (
+                        <div style={{ fontSize: 12, color: token.colorError, marginTop: 4 }}>
+                          {'❌ ' + task.error_message}
+                        </div>
+                      )}
+                      {task.task_result && task.status === 'completed' && (
+                        <div style={{ fontSize: 12, color: token.colorSuccess, marginTop: 4 }}>
+                          {'✅ ' + ((task.task_result as Record<string, unknown>).message as string || '任务完成')}
+                        </div>
+                      )}
+                    </div>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </Modal>
+
 
       {/* 章节阅读器 */}
       {readingChapter && (
