@@ -3024,13 +3024,14 @@ async def batch_generate_chapters_in_order(
     
     logger.info(f"📦 创建批量生成任务: {batch_id}, 章节: 第{start_number}-{end_number}章, 预估耗时: {estimated_time}分钟")
     
-    # 启动后台批量生成任务，传递model参数
+    # 启动后台批量生成任务，传递model参数和skill_key
     background_tasks.add_task(
         execute_batch_generation_in_order,
         batch_id=batch_id,
         user_id=user_id,
         ai_service=user_ai_service,
-        custom_model=batch_request.model
+        custom_model=batch_request.model,
+        skill_key=batch_request.skill_key
     )
     
     return BatchGenerateResponse(
@@ -3158,7 +3159,8 @@ async def execute_batch_generation_in_order(
     batch_id: str,
     user_id: str,
     ai_service: AIService,
-    custom_model: Optional[str] = None
+    custom_model: Optional[str] = None,
+    skill_key: Optional[str] = None
 ):
     """
     按顺序执行批量生成任务（后台任务）
@@ -3261,7 +3263,8 @@ async def execute_batch_generation_in_order(
                         ai_service=ai_service,
                         write_lock=write_lock,
                         custom_model=custom_model,
-                        previous_summary_context=last_generated_summary
+                        previous_summary_context=last_generated_summary,
+                        skill_key=skill_key
                     )
                     
                     # 更新上一章摘要，供下一章使用
@@ -3444,7 +3447,8 @@ async def generate_single_chapter_for_batch(
     ai_service: AIService,
     write_lock: Lock,
     custom_model: Optional[str] = None,
-    previous_summary_context: Optional[str] = None
+    previous_summary_context: Optional[str] = None,
+    skill_key: Optional[str] = None
 ) -> Optional[str]:
     """
     为批量生成执行单个章节的生成（非流式）
@@ -3624,9 +3628,36 @@ async def generate_single_chapter_for_batch(
     else:
         prompt = base_prompt
     
-    # 🎨 方案一：将写作风格注入到系统提示词（批量生成）
+    # 🎨 将 Skill / 写作风格注入到系统提示词（批量生成）
     system_prompt_with_style = None
-    if style_content:
+
+    # ⚡ Skill 支持
+    if skill_key:
+        try:
+            from app.services.skill_loader import get_all_skills_cached
+            skills = get_all_skills_cached()
+            skill = next((s for s in skills if s["template_key"] == skill_key), None)
+            if skill:
+                skill_content = skill["content"]
+                skill_name = skill["template_name"]
+                system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+
+{skill_content}
+
+⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
+                if style_content:
+                    system_prompt_with_style += f"""
+
+【🎨 写作风格要求 - 补充】
+
+{style_content}"""
+                logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+            else:
+                logger.warning(f"⚠️ 批量生成 - 未找到 Skill: {skill_key}")
+        except Exception as skill_err:
+            logger.warning(f"⚠️ 批量生成 - 加载 Skill 失败: {skill_err}")
+
+    if not system_prompt_with_style and style_content:
         system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
 
 {style_content}
