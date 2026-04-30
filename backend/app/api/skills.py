@@ -32,6 +32,7 @@ class SkillApplyChapterRequest(BaseModel):
     chapter_id: str
     skill_key: str
     model: Optional[str] = None  # 可选自定义模型
+    thinking_mode: Optional[str] = None  # 思考模式：low / medium / high / None
 
 
 class SkillCreateRequest(BaseModel):
@@ -252,6 +253,9 @@ async def apply_skill_to_chapter(
     }
     if request_body.model:
         generate_kwargs["model"] = request_body.model
+    if request_body.thinking_mode:
+        generate_kwargs["reasoning_effort"] = request_body.thinking_mode
+        logger.info(f"🧠 思考模式: {request_body.thinking_mode}")
 
     async def generate():
         import asyncio

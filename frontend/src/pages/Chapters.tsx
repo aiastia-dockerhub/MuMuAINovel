@@ -105,6 +105,7 @@ export default function Chapters() {
   // Skill 处理已有章节状态
   const [isApplyingSkill, setIsApplyingSkill] = useState(false);
   const [applySkillKey, setApplySkillKey] = useState<string | undefined>();
+  const [skillThinkingMode, setSkillThinkingMode] = useState<string | undefined>(undefined);
   // Skill 处理对比确认
   const [skillCompareVisible, setSkillCompareVisible] = useState(false);
   const [skillCompareOriginal, setSkillCompareOriginal] = useState('');
@@ -935,6 +936,7 @@ export default function Chapters() {
         body: JSON.stringify({
           chapter_id: editingId,
           skill_key: skillKey,
+          thinking_mode: skillThinkingMode || undefined,
         }),
       });
 
@@ -2909,7 +2911,7 @@ export default function Chapters() {
                 onChange={setApplySkillKey}
                 allowClear
                 disabled={isGenerating || isApplyingSkill}
-                style={{ minWidth: 180 }}
+                style={{ minWidth: 160 }}
                 size="small"
               >
                 {availableSkills.filter(s => s.skill_type === 'polishing').map(skill => (
@@ -2917,6 +2919,19 @@ export default function Chapters() {
                     {skill.template_name}
                   </Select.Option>
                 ))}
+              </Select>
+              <Select
+                placeholder="思考模式"
+                value={skillThinkingMode}
+                onChange={setSkillThinkingMode}
+                allowClear
+                disabled={isGenerating || isApplyingSkill}
+                style={{ minWidth: 110 }}
+                size="small"
+              >
+                <Select.Option value="low">🧠 浅思考</Select.Option>
+                <Select.Option value="medium">🧠 深思考</Select.Option>
+                <Select.Option value="high">🧠 深度思考</Select.Option>
               </Select>
               <Button
                 type="primary"

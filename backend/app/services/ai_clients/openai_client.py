@@ -26,13 +26,19 @@ class OpenAIClient(BaseAIClient):
         tools: Optional[list] = None,
         tool_choice: Optional[str] = None,
         stream: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # 思考模式：设置 reasoning_effort（DeepSeek/Kimi/OpenAI o系列 兼容）
+        # 开启思考模式时不传 temperature（部分模型要求）
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        else:
+            payload["temperature"] = temperature
         if stream:
             payload["stream"] = True
         if tools:
@@ -94,6 +100,7 @@ class OpenAIClient(BaseAIClient):
         max_tokens: int,
         tools: Optional[list] = None,
         tool_choice: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式生成，支持工具调用
@@ -105,6 +112,9 @@ class OpenAIClient(BaseAIClient):
             - done: bool - 是否结束
         """
         payload = self._build_payload(messages, model, temperature, max_tokens, tools, tool_choice, stream=True)
+        # 思考模式：追加 reasoning_effort（DeepSeek/Kimi/OpenAI o系列兼容）
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
         
         tool_calls_buffer = {}  # 收集工具调用块
         
