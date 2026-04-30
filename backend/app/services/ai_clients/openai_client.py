@@ -49,9 +49,11 @@ class OpenAIClient(BaseAIClient):
             "messages": messages,
             "max_tokens": max_tokens,
         }
-        # 思考模式：仅对支持的模型设置 reasoning_effort
+        # 思考模式：仅对支持的模型设置 reasoning_effort + enable_thinking
         if reasoning_effort and self._supports_reasoning_effort(model):
             payload["reasoning_effort"] = reasoning_effort
+            # DeepSeek/Qwen 等模型需要 enable_thinking 参数
+            payload["enable_thinking"] = True
             logger.info(f"🧠 模型 {model} 支持思考模式，设置 reasoning_effort={reasoning_effort}")
         else:
             payload["temperature"] = temperature
@@ -152,6 +154,11 @@ class OpenAIClient(BaseAIClient):
                                 if choices and len(choices) > 0:
                                     delta = choices[0].get("delta", {})
                                     content = delta.get("content", "")
+                                    
+                                    # 检查思考内容（DeepSeek R1 / Qwen 等推理模型）
+                                    reasoning_content = delta.get("reasoning_content", "")
+                                    if reasoning_content:
+                                        yield {"reasoning_content": reasoning_content}
                                     
                                     # 检查工具调用
                                     tc_list = delta.get("tool_calls")
