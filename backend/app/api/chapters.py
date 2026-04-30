@@ -1629,26 +1629,43 @@ async def generate_chapter_content_stream(
                 system_prompt_with_style = None
                 
                 # ⚡ Skill 支持：当指定 skill_key 时，将 Skill 工作流注入系统提示词
+                polishing_skill = None  # 润色类 Skill 暂存，用于两步流程
                 if skill_key:
                     try:
                         from app.services.skill_loader import get_all_skills_cached
                         skills = get_all_skills_cached()
                         skill = next((s for s in skills if s["template_key"] == skill_key), None)
                         if skill:
+                            skill_type = skill.get("skill_type", "generic")
                             skill_content = skill["content"]
                             skill_name = skill["template_name"]
-                            system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+                            
+                            if skill_type == "polishing":
+                                # 润色类 Skill：先正常生成，完成后用 Skill 润色（两步流程）
+                                polishing_skill = skill
+                                # 仍然将写作风格注入（如果有）
+                                if style_content:
+                                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                                logger.info(f"⚡ 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
+                            else:
+                                # 写作类/通用类 Skill：直接注入系统提示词
+                                system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
 
 {skill_content}
 
 ⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
-                            if style_content:
-                                system_prompt_with_style += f"""
+                                if style_content:
+                                    system_prompt_with_style += f"""
 
 【🎨 写作风格要求 - 补充】
 
 {style_content}"""
-                            logger.info(f"⚡ 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+                                logger.info(f"⚡ 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
                         else:
                             logger.warning(f"⚠️ 未找到 Skill: {skill_key}")
                     except Exception as skill_err:
@@ -1712,6 +1729,78 @@ async def generate_chapter_content_stream(
                         yield await tracker.heartbeat()
                     
                     await asyncio.sleep(0)  # 让出控制权
+                
+                # === 润色阶段（两步流程：润色类 Skill） ===
+                if polishing_skill:
+                    polishing_content = polishing_skill["content"]
+                    polishing_name = polishing_skill["template_name"]
+                    logger.info(f"✨ 两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
+                    
+                    yield await tracker.generating(
+                        current_chars=0,
+                        estimated_total=len(full_content),
+                        message=f'正在润色去AI味（{polishing_name}）...'
+                    )
+                    
+                    # 构建润色 prompt
+                    polishing_system = f"""【⚡ Skill 工作流：{polishing_name}】
+
+{polishing_content}
+
+⚠️ 请严格遵循上述 Skill 工作流指令执行润色！"""
+
+                    polishing_user_prompt = f"""请对以下章节内容进行去AI味润色，按照你的工作流执行（Phase 1 扫描 → Phase 2 诊断 → Phase 3 清除 → Phase 4 输出润色后全文）。
+
+最终只输出润色后的完整章节正文内容，不要输出检测报告、诊断分析等中间过程。
+
+---
+{full_content}
+---"""
+
+                    # 计算润色的 max_tokens（比原文多一些空间）
+                    polishing_max_tokens = max(2000, min(int(len(full_content) * 3), 16000))
+                    
+                    polishing_kwargs = {
+                        "prompt": polishing_user_prompt,
+                        "system_prompt": polishing_system,
+                        "max_tokens": polishing_max_tokens,
+                    }
+                    if custom_model:
+                        polishing_kwargs["model"] = custom_model
+                    
+                    polished_content = ""
+                    polish_chunk_count = 0
+                    
+                    async for chunk in user_ai_service.generate_text_stream(**polishing_kwargs):
+                        polished_content += chunk
+                        polish_chunk_count += 1
+                        
+                        # 发送润色内容块（用特殊事件标记）
+                        yield await SSEResponse.send_event('polishing_chunk', {'content': chunk})
+                        
+                        if polish_chunk_count % 5 == 0:
+                            yield await tracker.generating(
+                                current_chars=len(polished_content),
+                                estimated_total=len(full_content),
+                                message=f'润色中... 已处理 {len(polished_content)} 字'
+                            )
+                        
+                        if polish_chunk_count % 20 == 0:
+                            yield await tracker.heartbeat()
+                        
+                        await asyncio.sleep(0)
+                    
+                    # 用润色后的内容替换原始内容
+                    if polished_content.strip():
+                        full_content = polished_content.strip()
+                        logger.info(f"✨ 润色完成：{len(full_content)}字")
+                        # 发送润色完成事件
+                        yield await SSEResponse.send_event('polishing_done', {
+                            'word_count': len(full_content),
+                            'original_word_count': len(full_content),
+                        })
+                    else:
+                        logger.warning(f"⚠️ 润色结果为空，使用原始内容")
                 
                 # === 保存阶段 ===
                 yield await tracker.saving("正在保存章节...", 0.3)
@@ -3631,28 +3720,44 @@ async def generate_single_chapter_for_batch(
     
     # 🎨 将 Skill / 写作风格注入到系统提示词（批量生成）
     system_prompt_with_style = None
+    polishing_skill = None  # 润色类 Skill 暂存，用于两步流程
 
-    # ⚡ Skill 支持
+    # ⚡ Skill 支持（批量生成）
     if skill_key:
         try:
             from app.services.skill_loader import get_all_skills_cached
             skills = get_all_skills_cached()
             skill = next((s for s in skills if s["template_key"] == skill_key), None)
             if skill:
+                skill_type = skill.get("skill_type", "generic")
                 skill_content = skill["content"]
                 skill_name = skill["template_name"]
-                system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+                
+                if skill_type == "polishing":
+                    # 润色类 Skill：先正常生成，完成后用 Skill 润色（两步流程）
+                    polishing_skill = skill
+                    if style_content:
+                        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                    logger.info(f"⚡ 批量生成 - 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
+                else:
+                    # 写作类/通用类 Skill：直接注入系统提示词
+                    system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
 
 {skill_content}
 
 ⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
-                if style_content:
-                    system_prompt_with_style += f"""
+                    if style_content:
+                        system_prompt_with_style += f"""
 
 【🎨 写作风格要求 - 补充】
 
 {style_content}"""
-                logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+                    logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
             else:
                 logger.warning(f"⚠️ 批量生成 - 未找到 Skill: {skill_key}")
         except Exception as skill_err:
@@ -3691,6 +3796,46 @@ async def generate_single_chapter_for_batch(
     # 批量生成中的流式生成（非SSE，不需要修改进度显示）
     async for chunk in ai_service.generate_text_stream(**generate_kwargs):
         full_content += chunk
+    
+    # === 润色阶段（两步流程：润色类 Skill - 批量生成） ===
+    if polishing_skill:
+        polishing_content = polishing_skill["content"]
+        polishing_name = polishing_skill["template_name"]
+        logger.info(f"✨ 批量生成两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
+        
+        polishing_system = f"""【⚡ Skill 工作流：{polishing_name}】
+
+{polishing_content}
+
+⚠️ 请严格遵循上述 Skill 工作流指令执行润色！"""
+
+        polishing_user_prompt = f"""请对以下章节内容进行去AI味润色，按照你的工作流执行（Phase 1 扫描 → Phase 2 诊断 → Phase 3 清除 → Phase 4 输出润色后全文）。
+
+最终只输出润色后的完整章节正文内容，不要输出检测报告、诊断分析等中间过程。
+
+---
+{full_content}
+---"""
+
+        polishing_max_tokens = max(2000, min(int(len(full_content) * 3), 16000))
+        
+        polishing_kwargs = {
+            "prompt": polishing_user_prompt,
+            "system_prompt": polishing_system,
+            "max_tokens": polishing_max_tokens,
+        }
+        if custom_model:
+            polishing_kwargs["model"] = custom_model
+        
+        polished_content = ""
+        async for chunk in ai_service.generate_text_stream(**polishing_kwargs):
+            polished_content += chunk
+        
+        if polished_content.strip():
+            full_content = polished_content.strip()
+            logger.info(f"✨ 批量生成润色完成：{len(full_content)}字")
+        else:
+            logger.warning(f"⚠️ 批量生成润色结果为空，使用原始内容")
     
     # 更新章节内容到数据库（使用锁保护）
     async with write_lock:

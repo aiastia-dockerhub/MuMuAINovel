@@ -67,7 +67,7 @@ export default function Chapters() {
   const [batchSelectedModel, setBatchSelectedModel] = useState<string | undefined>(); // 批量生成的模型选择
   const [batchSelectedSkillKey, setBatchSelectedSkillKey] = useState<string | undefined>(); // 批量生成的Skill选择
   const [temporaryNarrativePerspective, setTemporaryNarrativePerspective] = useState<string | undefined>(); // 临时人称选择
-  const [availableSkills, setAvailableSkills] = useState<Array<{ template_key: string; template_name: string; description: string; category: string }>>([]);
+  const [availableSkills, setAvailableSkills] = useState<Array<{ template_key: string; template_name: string; description: string; category: string; skill_type: string }>>([]);
   const [selectedSkillKey, setSelectedSkillKey] = useState<string | undefined>();
   const [analysisVisible, setAnalysisVisible] = useState(false);
   const [analysisChapterId, setAnalysisChapterId] = useState<string | null>(null);
@@ -2681,11 +2681,14 @@ export default function Chapters() {
                 showSearch
                 optionFilterProp="label"
               >
-                {availableSkills.map(skill => (
+                {availableSkills.filter(s => !['analysis', 'tool'].includes(s.skill_type)).map(skill => (
                   <Select.Option key={skill.template_key} value={skill.template_key} label={skill.template_name}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span>{skill.template_name}</span>
                       <Tag style={{ fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>{skill.category}</Tag>
+                      {skill.skill_type === 'polishing' && (
+                        <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 3px' }}>两步流程</Tag>
+                      )}
                     </div>
                   </Select.Option>
                 ))}
@@ -2693,8 +2696,13 @@ export default function Chapters() {
               {selectedSkillKey && (() => {
                 const skill = availableSkills.find(s => s.template_key === selectedSkillKey);
                 return skill ? (
-                  <div style={{ color: token.colorSuccess, fontSize: 12, marginTop: 4 }}>
-                    ✓ {skill.description}
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    <span style={{ color: token.colorSuccess }}>✓ {skill.description}</span>
+                    {skill.skill_type === 'polishing' && (
+                      <div style={{ color: token.colorWarning, marginTop: 2 }}>
+                        ⚡ 润色类 Skill：先生成初稿，再自动执行去AI味润色
+                      </div>
+                    )}
                   </div>
                 ) : null;
               })()}
@@ -3011,11 +3019,14 @@ export default function Chapters() {
                   showSearch
                   optionFilterProp="label"
                 >
-                  {availableSkills.map(skill => (
+                  {availableSkills.filter(s => !['analysis', 'tool'].includes(s.skill_type)).map(skill => (
                     <Select.Option key={skill.template_key} value={skill.template_key} label={skill.template_name}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span>{skill.template_name}</span>
                         <Tag style={{ fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>{skill.category}</Tag>
+                        {skill.skill_type === 'polishing' && (
+                          <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 3px' }}>两步流程</Tag>
+                        )}
                       </div>
                     </Select.Option>
                   ))}

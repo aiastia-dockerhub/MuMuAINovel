@@ -33,6 +33,7 @@ class SkillCreateRequest(BaseModel):
     description: str    # Skill 描述
     body: str           # 工作流指令（Markdown 正文）
     references: Optional[Dict[str, str]] = None  # 参考知识库 {"文件名": "内容"}
+    skill_type: Optional[str] = None  # Skill 类型：writing/polishing/analysis/tool/generic
 
 
 class SkillUpdateRequest(BaseModel):
@@ -40,6 +41,7 @@ class SkillUpdateRequest(BaseModel):
     description: Optional[str] = None
     body: Optional[str] = None
     references: Optional[Dict[str, str]] = None
+    skill_type: Optional[str] = None  # Skill 类型：writing/polishing/analysis/tool/generic
 
 
 @router.get("/list")
@@ -51,6 +53,8 @@ async def list_skills(user: User = Depends(require_login)):
             "template_key": s["template_key"],
             "template_name": s["template_name"],
             "category": s["category"],
+            "skill_type": s.get("skill_type", "generic"),
+            "category_hint": s.get("category_hint", ""),
             "description": s["description"],
             "triggers": s.get("triggers", []),
         }
@@ -173,6 +177,8 @@ async def get_skill_detail_api(skill_key: str, user: User = Depends(require_logi
         "template_key": detail["template_key"],
         "template_name": detail["template_name"],
         "category": detail["category"],
+        "skill_type": detail.get("skill_type", "generic"),
+        "category_hint": detail.get("category_hint", ""),
         "description": detail["description"],
         "triggers": detail.get("triggers", []),
         "raw_content": detail.get("raw_content", ""),
@@ -189,6 +195,7 @@ async def create_skill(request: SkillCreateRequest, user: User = Depends(require
             description=request.description,
             body=request.body,
             references=request.references,
+            skill_type=request.skill_type,
         )
         return {"success": True, "skill": result}
     except ValueError as e:
@@ -209,6 +216,7 @@ async def update_skill(skill_key: str, request: SkillUpdateRequest, user: User =
             description=request.description,
             body=request.body,
             references=request.references,
+            skill_type=request.skill_type,
         )
         return {"success": True, "skill": result}
     except ValueError as e:
