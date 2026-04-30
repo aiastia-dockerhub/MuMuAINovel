@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Progress, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, Pagination, theme } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined, ClockCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, Pagination, theme } from 'antd';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { eventBus } from '../store/eventBus';
 import { useChapterSync } from '../store/hooks';
@@ -2010,13 +2010,6 @@ export default function Chapters() {
             一键分析{batchAnalyzableChapterCount > 0 ? ` (${batchAnalyzableChapterCount})` : ''}
           </Button>
           <Button
-            icon={<ClockCircleOutlined />}
-            onClick={showTaskListModal}
-          >
-            后台任务
-            {projectBgTasks.length > 0 && <Badge count={projectBgTasks.length} size="small" style={{ marginLeft: 4 }} />}
-          </Button>
-          <Button
             type="primary"
             icon={<RocketOutlined />}
             onClick={handleOpenBatchGenerate}
@@ -2591,7 +2584,7 @@ export default function Chapters() {
                     icon={canGenerate ? <ThunderboltOutlined /> : <LockOutlined />}
                     onClick={() => currentChapter && showGenerateModal(currentChapter)}
                     loading={isContinuing}
-                    disabled={!canGenerate || bgTaskRunning}
+                    disabled={!canGenerate}
                     danger={!canGenerate}
                     style={{ fontWeight: 'bold' }}
                     title={!canGenerate ? disabledReason : '根据大纲和前置章节内容创作（流式）'}

@@ -1,6 +1,6 @@
-﻿import { useState, useEffect, useMemo, useRef } from 'react';
-import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs, Pagination, theme, Progress, Badge, Tooltip } from 'antd';
-import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined, ClockCircleOutlined, ReloadOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+﻿import { useState, useEffect, useMemo } from 'react';
+import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tabs, Pagination, theme, Tooltip } from 'antd';
+import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { eventBus } from '../store/eventBus';
 import { getProjectTasks, type TaskStatus } from '../services/backgroundTaskService';
@@ -1501,15 +1501,6 @@ export default function Outline() {
             >
               {isMobile ? 'AI生成/续写' : 'AI生成/续写大纲'}
             </Button>
-            <Tooltip title="查看后台任务进度">
-              <Button
-                icon={<ClockCircleOutlined />}
-                onClick={showTaskListModal}
-                block={isMobile}
-              >
-                {isMobile ? '任务' : '后台任务'}
-              </Button>
-            </Tooltip>
             {outlines.length > 0 && currentProject?.outline_mode === 'one-to-many' && (
               <Button
                 icon={<AppstoreAddOutlined />}
