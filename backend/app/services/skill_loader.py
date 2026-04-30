@@ -59,7 +59,7 @@ SKILL_TYPES = {
 
 # 根据 name 自动推断 skill_type 的关键词映射
 SKILL_TYPE_KEYWORDS = {
-    "writing": ["write", "写作"],
+    "writing": ["write", "写作", "dialogue", "tension", "对话", "悬念"],
     "polishing": ["deslop", "polish", "润色", "去味"],
     "analysis": ["analyze", "scan", "分析", "拆文", "扫榜"],
     "tool": ["browser", "cdp", "工具", "浏览器"],
@@ -274,24 +274,16 @@ def get_skill_by_trigger(user_input: str) -> Optional[Dict]:
         "写长篇": ["SKILL_STORY_LONG_WRITE"],
         "帮我开书": ["SKILL_STORY_LONG_WRITE"],
         "写大纲": ["SKILL_STORY_LONG_WRITE"],
-        "短篇写作": ["SKILL_STORY_SHORT_WRITE"],
-        "写短篇": ["SKILL_STORY_SHORT_WRITE"],
-        "写个盐言": ["SKILL_STORY_SHORT_WRITE"],
-        "长篇拆文": ["SKILL_STORY_LONG_ANALYZE"],
-        "拆书": ["SKILL_STORY_LONG_ANALYZE"],
-        "分析黄金三章": ["SKILL_STORY_LONG_ANALYZE"],
-        "短篇拆文": ["SKILL_STORY_SHORT_ANALYZE"],
-        "分析短篇": ["SKILL_STORY_SHORT_ANALYZE"],
-        "长篇扫榜": ["SKILL_STORY_LONG_SCAN"],
-        "长篇什么火": ["SKILL_STORY_LONG_SCAN"],
-        "起点排行": ["SKILL_STORY_LONG_SCAN"],
-        "短篇扫榜": ["SKILL_STORY_SHORT_SCAN"],
-        "短篇什么火": ["SKILL_STORY_SHORT_SCAN"],
         "去ai味": ["SKILL_STORY_DESLOP"],
         "去味": ["SKILL_STORY_DESLOP"],
         "太ai了": ["SKILL_STORY_DESLOP"],
-        "润色": ["SKILL_STORY_DESLOP"],
-        "浏览器": ["SKILL_BROWSER_CDP"],
+        "润色": ["SKILL_STORY_DESLOP", "SKILL_STORY_POLISH"],
+        "帮我改": ["SKILL_STORY_POLISH"],
+        "优化文字": ["SKILL_STORY_POLISH"],
+        "对话": ["SKILL_STORY_DIALOGUE"],
+        "悬念": ["SKILL_STORY_TENSION"],
+        "太平淡": ["SKILL_STORY_TENSION"],
+        "紧张感": ["SKILL_STORY_TENSION"],
     }
     
     for keyword, skill_keys in keyword_map.items():
