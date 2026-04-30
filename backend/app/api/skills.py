@@ -172,7 +172,8 @@ async def skill_chat(
 
 @router.post("/apply-to-chapter")
 async def apply_skill_to_chapter(
-    request: SkillApplyChapterRequest,
+    request_body: SkillApplyChapterRequest,
+    http_request: Request,
     user: User = Depends(require_login),
     db: AsyncSession = Depends(get_db),
 ):
@@ -186,29 +187,31 @@ async def apply_skill_to_chapter(
     4. 流式返回处理结果
     5. 自动保存回章节
     """
+    from fastapi import HTTPException
     from sqlalchemy import select
     from app.models.chapter import Chapter
     from app.models.project import Project
     from app.api.common import verify_project_access
     from app.api.settings import get_user_ai_service
 
-    user_id = str(user.id)
+    user_id = getattr(http_request.state, 'user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
 
     # 查找 Skill
     skills = get_all_skills_cached()
     skill = None
     for s in skills:
-        if s["template_key"] == request.skill_key:
+        if s["template_key"] == request_body.skill_key:
             skill = s
             break
 
     if not skill:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"未找到 Skill: {request.skill_key}")
+        raise HTTPException(status_code=404, detail=f"未找到 Skill: {request_body.skill_key}")
 
     # 获取章节
     result = await db.execute(
-        select(Chapter).where(Chapter.id == request.chapter_id)
+        select(Chapter).where(Chapter.id == request_body.chapter_id)
     )
     chapter = result.scalar_one_or_none()
     if not chapter:
@@ -226,7 +229,7 @@ async def apply_skill_to_chapter(
     skill_name = skill["template_name"]
     chapter_content = chapter.content
 
-    logger.info(f"🔧 对章节 {request.chapter_id} 应用 Skill '{skill_name}'（{len(chapter_content)}字）")
+    logger.info(f"🔧 对章节 {request_body.chapter_id} 应用 Skill '{skill_name}'（{len(chapter_content)}字）")
 
     # 获取 AI 服务
     try:
@@ -247,8 +250,8 @@ async def apply_skill_to_chapter(
         "system_prompt": system_prompt,
         "max_tokens": max_tokens,
     }
-    if request.model:
-        generate_kwargs["model"] = request.model
+    if request_body.model:
+        generate_kwargs["model"] = request_body.model
 
     async def generate():
         import asyncio
@@ -279,7 +282,7 @@ async def apply_skill_to_chapter(
                 AsyncSessionLocal = async_sessionmaker(engine, class_=NewAsyncSession, expire_on_commit=False)
                 async with AsyncSessionLocal() as save_db:
                     result = await save_db.execute(
-                        select(Chapter).where(Chapter.id == request.chapter_id)
+                        select(Chapter).where(Chapter.id == request_body.chapter_id)
                     )
                     ch = result.scalar_one_or_none()
                     if ch:
