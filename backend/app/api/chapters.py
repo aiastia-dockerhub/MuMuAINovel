@@ -1349,6 +1349,7 @@ async def generate_chapter_content_stream(
     custom_model = generate_request.model if hasattr(generate_request, 'model') else None
     temp_narrative_perspective = generate_request.narrative_perspective if hasattr(generate_request, 'narrative_perspective') else None
     skill_key = generate_request.skill_key if hasattr(generate_request, 'skill_key') else None
+    reasoning_effort = generate_request.reasoning_effort if hasattr(generate_request, 'reasoning_effort') else None
     # 预先验证章节存在性（使用临时会话）
     async for temp_db in get_db(request):
         try:
@@ -1701,6 +1702,9 @@ async def generate_chapter_content_stream(
                     generate_kwargs["model"] = custom_model
                     # 注意：这里使用用户配置的AI服务，模型参数会覆盖默认模型
                     # 如果需要切换provider，需要在前端传递provider参数
+                if reasoning_effort:
+                    generate_kwargs["reasoning_effort"] = reasoning_effort
+                    logger.info(f"  🧠 思考模式: reasoning_effort={reasoning_effort}")
                 
                 # === 生成阶段 ===
                 full_content = ""
@@ -1761,6 +1765,8 @@ async def generate_chapter_content_stream(
                     }
                     if custom_model:
                         polishing_kwargs["model"] = custom_model
+                    if reasoning_effort:
+                        polishing_kwargs["reasoning_effort"] = reasoning_effort
                     
                     polished_content = ""
                     polish_chunk_count = 0
@@ -3116,7 +3122,8 @@ async def batch_generate_chapters_in_order(
         user_id=user_id,
         ai_service=user_ai_service,
         custom_model=batch_request.model,
-        skill_key=batch_request.skill_key
+        skill_key=batch_request.skill_key,
+        reasoning_effort=batch_request.reasoning_effort
     )
     
     return BatchGenerateResponse(
@@ -3245,7 +3252,8 @@ async def execute_batch_generation_in_order(
     user_id: str,
     ai_service: AIService,
     custom_model: Optional[str] = None,
-    skill_key: Optional[str] = None
+    skill_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None
 ):
     """
     按顺序执行批量生成任务（后台任务）
@@ -3349,7 +3357,8 @@ async def execute_batch_generation_in_order(
                         write_lock=write_lock,
                         custom_model=custom_model,
                         previous_summary_context=last_generated_summary,
-                        skill_key=skill_key
+                        skill_key=skill_key,
+                        reasoning_effort=reasoning_effort
                     )
                     
                     # 更新上一章摘要，供下一章使用
@@ -3532,7 +3541,8 @@ async def generate_single_chapter_for_batch(
     write_lock: Lock,
     custom_model: Optional[str] = None,
     previous_summary_context: Optional[str] = None,
-    skill_key: Optional[str] = None
+    skill_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None
 ) -> Optional[str]:
     """
     为批量生成执行单个章节的生成（非流式）
@@ -3788,6 +3798,9 @@ async def generate_single_chapter_for_batch(
     if custom_model:
         generate_kwargs["model"] = custom_model
         logger.info(f"  批量生成使用自定义模型: {custom_model}")
+    if reasoning_effort:
+        generate_kwargs["reasoning_effort"] = reasoning_effort
+        logger.info(f"  批量生成 🧠 思考模式: reasoning_effort={reasoning_effort}")
     
     # 批量生成中的流式生成（非SSE，不需要修改进度显示）
     async for chunk in ai_service.generate_text_stream(**generate_kwargs):
@@ -3814,6 +3827,8 @@ async def generate_single_chapter_for_batch(
         }
         if custom_model:
             polishing_kwargs["model"] = custom_model
+        if reasoning_effort:
+            polishing_kwargs["reasoning_effort"] = reasoning_effort
         
         polished_content = ""
         async for chunk in ai_service.generate_text_stream(**polishing_kwargs):
