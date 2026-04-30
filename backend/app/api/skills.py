@@ -243,8 +243,8 @@ async def apply_skill_to_chapter(
     system_prompt = skill_content
     user_prompt = f"请对以下章节内容执行处理，只做局部修改，不要整段重写。直接输出处理后的完整正文，不要任何解释。\n\n{chapter_content}"
 
-    # 计算 max_tokens（中文字符约1.5-2 token/字，需用3倍字符数确保不截断）
-    max_tokens = max(4000, min(int(len(chapter_content) * 3), 32000))
+    # 计算 max_tokens（中文字符约1.5-2 token/字，需用5倍字符数确保不截断）
+    max_tokens = max(4000, min(int(len(chapter_content) * 5), 64000))
 
     generate_kwargs = {
         "prompt": user_prompt,
