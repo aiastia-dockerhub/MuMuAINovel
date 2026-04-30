@@ -399,8 +399,10 @@ class PromptService:
 ]
 
 【characters字段说明】
-- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派等
+- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派/公司/机构等
 - 必须区分角色和组织，不要把组织当作角色
+- ⚠️ 重要：故事中出现的帮派、门派、公司、政府机构、学校、家族等组织/势力实体都必须列入characters，并标记type为"organization"
+- 每章characters中应包含该章涉及的组织/势力（如果剧情涉及的话）
 
 【格式规范】
 - 纯JSON数组输出，无markdown标记
@@ -520,8 +522,10 @@ class PromptService:
 ]
 
 【characters字段说明】
-- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派等
+- type为"character"表示个人角色，type为"organization"表示组织/势力/门派/帮派/公司/机构等
 - 必须区分角色和组织，不要把组织当作角色
+- ⚠️ 重要：故事中出现的帮派、门派、公司、政府机构、学校、家族等组织/势力实体都必须列入characters，并标记type为"organization"
+- 每章characters中应包含该章涉及的组织/势力（如果剧情涉及的话）
 
 【格式规范】
 - 纯JSON数组输出，无markdown标记
