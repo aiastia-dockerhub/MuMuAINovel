@@ -27,6 +27,13 @@ class SkillChatRequest(BaseModel):
     history: Optional[List[dict]] = None  # 历史对话 [{"role": "user/assistant", "content": "..."}]
 
 
+class SkillApplyChapterRequest(BaseModel):
+    """对已有章节应用 Skill"""
+    chapter_id: str
+    skill_key: str
+    model: Optional[str] = None  # 可选自定义模型
+
+
 class SkillCreateRequest(BaseModel):
     """创建 Skill 请求"""
     name: str           # Skill 名称（英文，如 my-new-skill）
@@ -159,6 +166,150 @@ async def skill_chat(
         except Exception as e:
             logger.error(f"Skill 聊天生成失败: {e}")
             yield await SSEResponse.send_error(f"生成失败: {str(e)}")
+
+    return create_sse_response(generate())
+
+
+@router.post("/apply-to-chapter")
+async def apply_skill_to_chapter(
+    request: SkillApplyChapterRequest,
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    对已有章节应用 Skill（流式返回）
+
+    工作流程：
+    1. 加载章节内容
+    2. 以 Skill 内容作为系统提示词
+    3. 将章节内容发给 AI 处理
+    4. 流式返回处理结果
+    5. 自动保存回章节
+    """
+    from sqlalchemy import select
+    from app.models.chapter import Chapter
+    from app.models.project import Project
+    from app.api.common import verify_project_access
+    from app.api.settings import get_user_ai_service
+
+    user_id = str(user.id)
+
+    # 查找 Skill
+    skills = get_all_skills_cached()
+    skill = None
+    for s in skills:
+        if s["template_key"] == request.skill_key:
+            skill = s
+            break
+
+    if not skill:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"未找到 Skill: {request.skill_key}")
+
+    # 获取章节
+    result = await db.execute(
+        select(Chapter).where(Chapter.id == request.chapter_id)
+    )
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    # 验证权限
+    await verify_project_access(chapter.project_id, user_id, db)
+
+    if not chapter.content or chapter.content.strip() == "":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="章节内容为空")
+
+    skill_content = skill["content"]
+    skill_name = skill["template_name"]
+    chapter_content = chapter.content
+
+    logger.info(f"🔧 对章节 {request.chapter_id} 应用 Skill '{skill_name}'（{len(chapter_content)}字）")
+
+    # 获取 AI 服务
+    try:
+        ai_service = await get_user_ai_service(user=user, db=db)
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"AI 服务配置错误: {str(e)}")
+
+    # 构建提示词
+    system_prompt = skill_content
+    user_prompt = f"请对以下章节内容执行处理，只做局部修改，不要整段重写。直接输出处理后的完整正文，不要任何解释。\n\n{chapter_content}"
+
+    # 计算 max_tokens
+    max_tokens = max(2000, min(int(len(chapter_content) * 1.5), 16000))
+
+    generate_kwargs = {
+        "prompt": user_prompt,
+        "system_prompt": system_prompt,
+        "max_tokens": max_tokens,
+    }
+    if request.model:
+        generate_kwargs["model"] = request.model
+
+    async def generate():
+        import asyncio
+        full_content = ""
+        chunk_count = 0
+
+        try:
+            yield await SSEResponse.send_progress(f"正在使用 {skill_name} 处理章节...", 10)
+
+            async for chunk in ai_service.generate_text_stream(**generate_kwargs):
+                full_content += chunk
+                chunk_count += 1
+                yield await SSEResponse.send_chunk(chunk)
+
+                # 每20个chunk发送心跳
+                if chunk_count % 20 == 0:
+                    yield await SSEResponse.send_heartbeat()
+
+                await asyncio.sleep(0)
+
+            # 自动保存回章节
+            if full_content.strip():
+                # 需要新的数据库会话来保存
+                from app.database import get_engine
+                from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as NewAsyncSession
+
+                engine = await get_engine(user_id)
+                AsyncSessionLocal = async_sessionmaker(engine, class_=NewAsyncSession, expire_on_commit=False)
+                async with AsyncSessionLocal() as save_db:
+                    result = await save_db.execute(
+                        select(Chapter).where(Chapter.id == request.chapter_id)
+                    )
+                    ch = result.scalar_one_or_none()
+                    if ch:
+                        old_word_count = ch.word_count or 0
+                        new_word_count = len(full_content.strip())
+                        ch.content = full_content.strip()
+                        ch.word_count = new_word_count
+
+                        # 更新项目字数
+                        proj_result = await save_db.execute(
+                            select(Project).where(Project.id == ch.project_id)
+                        )
+                        proj = proj_result.scalar_one_or_none()
+                        if proj:
+                            proj.current_words = (proj.current_words or 0) - old_word_count + new_word_count
+
+                        await save_db.commit()
+                        logger.info(f"✅ Skill '{skill_name}' 处理完成并保存：{old_word_count}字 → {new_word_count}字")
+
+                yield await SSEResponse.send_event("saved", {
+                    "word_count": len(full_content.strip()),
+                    "message": f"处理完成，已自动保存"
+                })
+
+            yield await SSEResponse.send_progress("处理完成", 100, "success")
+            yield await SSEResponse.send_done()
+
+        except Exception as e:
+            logger.error(f"Skill 处理章节失败: {e}")
+            yield await SSEResponse.send_error(f"处理失败: {str(e)}")
 
     return create_sse_response(generate())
 
