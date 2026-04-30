@@ -516,7 +516,8 @@ class AutoCharacterService:
                     "name": char_name,
                     "role_description": f"在大纲中出现的角色，出现场景：\n{context_text}",
                     "suggested_role_type": "supporting",
-                    "importance": "medium"
+                    "importance": "medium",
+                    "organization_check": "⚠️ 请先判断该名称是个人角色还是组织/势力/团体。如果该名称代表的是一个组织（如门派、小队、公司、帮会、机构等），请设置 is_organization: true 并按组织格式返回数据。"
                 }
                 
                 logger.info(f"  🤖 [{idx+1}/{len(missing_names)}] 生成角色详情: {char_name}")
@@ -530,6 +531,10 @@ class AutoCharacterService:
                     user_id=user_id,
                     enable_mcp=enable_mcp
                 )
+                
+                # 检查AI是否判定该名称实际为组织
+                if character_data.get("is_organization", False):
+                    logger.info(f"  🏛️ AI判定 '{char_name}' 为组织/势力，将按组织格式创建")
                 
                 # 确保使用大纲中的角色名称
                 character_data['name'] = char_name
