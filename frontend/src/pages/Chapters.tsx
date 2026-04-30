@@ -3217,6 +3217,26 @@ export default function Chapters() {
               </Form.Item>
             </div>
 
+            {/* 第四行：思考模式 */}
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 0 : 16 }}>
+              <Form.Item
+                label="思考模式"
+                tooltip="开启后模型会先思考再输出，如果模型不支持会报错，关掉就好"
+                style={{ flex: 1, marginBottom: 12 }}
+              >
+                <Select
+                  placeholder="不使用思考模式"
+                  value={skillThinkingMode}
+                  onChange={setSkillThinkingMode}
+                  allowClear
+                >
+                  <Select.Option value="low">🧠 浅思考</Select.Option>
+                  <Select.Option value="medium">🧠 深思考</Select.Option>
+                  <Select.Option value="high">🧠 深度思考</Select.Option>
+                </Select>
+              </Form.Item>
+            </div>
+
             {/* 同步分析（固定开启） */}
             <Form.Item
               label="同步分析"
