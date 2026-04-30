@@ -2928,6 +2928,7 @@ export default function Chapters() {
                 disabled={isGenerating || isApplyingSkill}
                 style={{ minWidth: 110 }}
                 size="small"
+                title="仅支持 DeepSeek-R1/Kimi-k1/OpenAI-o 等推理模型，普通模型会自动忽略"
               >
                 <Select.Option value="low">🧠 浅思考</Select.Option>
                 <Select.Option value="medium">🧠 深思考</Select.Option>
