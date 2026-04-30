@@ -241,7 +241,12 @@ async def apply_skill_to_chapter(
 
     # 构建提示词
     system_prompt = skill_content
-    user_prompt = f"请严格按照上方规则处理以下章节内容。直接输出处理后的完整正文，不要任何解释、分析或标记。\n\n{chapter_content}"
+    user_prompt = (
+        "【强制要求】你必须逐句重写以下章节内容，而不是微调。\n"
+        "每一段都必须用你自己的话重新写出来，保留剧情和信息但表达方式必须不同。\n"
+        "直接输出重写后的完整正文，不要任何解释、分析或标记。\n\n"
+        f"{chapter_content}"
+    )
 
     # 计算 max_tokens（中文字符约1.5-2 token/字，需用5倍字符数确保不截断）
     max_tokens = max(4000, min(int(len(chapter_content) * 5), 64000))
