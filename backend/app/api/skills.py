@@ -255,7 +255,9 @@ async def apply_skill_to_chapter(
         generate_kwargs["model"] = request_body.model
     if request_body.thinking_mode:
         generate_kwargs["reasoning_effort"] = request_body.thinking_mode
-        logger.info(f"🧠 思考模式: {request_body.thinking_mode}")
+        # 思考模式下推理 token 会占用 max_tokens，需要翻倍确保输出不被截断
+        generate_kwargs["max_tokens"] = min(max_tokens * 2, 128000)
+        logger.info(f"🧠 思考模式: {request_body.thinking_mode}，max_tokens 从 {max_tokens} 提升到 {generate_kwargs['max_tokens']}")
 
     async def generate():
         import asyncio
