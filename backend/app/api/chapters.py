@@ -1653,18 +1653,20 @@ async def generate_chapter_content_stream(
 确保在整个章节创作过程中始终保持风格的一致性。"""
                                 logger.info(f"⚡ 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
                             else:
-                                # 写作类/通用类 Skill：直接注入系统提示词
-                                system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+                                # 写作类/通用类 Skill：先放写作风格，Skill 放最后
+                                if style_content:
+                                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                                system_prompt_with_style = (system_prompt_with_style or "") + f"""
+
+【⚡ Skill 工作流：{skill_name}】
 
 {skill_content}
 
 ⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
-                                if style_content:
-                                    system_prompt_with_style += f"""
-
-【🎨 写作风格要求 - 补充】
-
-{style_content}"""
                                 logger.info(f"⚡ 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
                         else:
                             logger.warning(f"⚠️ 未找到 Skill: {skill_key}")
@@ -3737,18 +3739,20 @@ async def generate_single_chapter_for_batch(
 确保在整个章节创作过程中始终保持风格的一致性。"""
                     logger.info(f"⚡ 批量生成 - 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
                 else:
-                    # 写作类/通用类 Skill：直接注入系统提示词
-                    system_prompt_with_style = f"""【⚡ Skill 工作流：{skill_name}】
+                    # 写作类/通用类 Skill：先放写作风格，Skill 放最后
+                    if style_content:
+                        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                    system_prompt_with_style = (system_prompt_with_style or "") + f"""
+
+【⚡ Skill 工作流：{skill_name}】
 
 {skill_content}
 
 ⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
-                    if style_content:
-                        system_prompt_with_style += f"""
-
-【🎨 写作风格要求 - 补充】
-
-{style_content}"""
                     logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
             else:
                 logger.warning(f"⚠️ 批量生成 - 未找到 Skill: {skill_key}")
