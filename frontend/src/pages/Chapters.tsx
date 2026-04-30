@@ -873,7 +873,8 @@ export default function Chapters() {
         },
         selectedModel,  // 传递选中的模型
         temporaryNarrativePerspective,  // 传递临时人称参数
-        selectedSkillKey  // 传递选中的Skill
+        selectedSkillKey,  // 传递选中的Skill
+        skillThinkingMode  // 传递思考模式
       );
 
       message.success('AI创作成功，正在分析章节内容...');
@@ -1286,6 +1287,7 @@ export default function Chapters() {
         target_word_count: number;
         model?: string;
         skill_key?: string;
+        reasoning_effort?: string;
       } = {
         start_chapter_number: values.startChapterNumber,
         count: values.count,
@@ -1306,6 +1308,12 @@ export default function Chapters() {
       if (batchSelectedSkillKey) {
         requestBody.skill_key = batchSelectedSkillKey;
         console.log('[批量生成] 请求体包含skill_key:', batchSelectedSkillKey);
+      }
+
+      // 如果有思考模式，添加到请求体中
+      if (skillThinkingMode) {
+        requestBody.reasoning_effort = skillThinkingMode;
+        console.log('[批量生成] 请求体包含reasoning_effort:', skillThinkingMode);
       }
 
       console.log('[批量生成] 完整请求体:', JSON.stringify(requestBody, null, 2));
