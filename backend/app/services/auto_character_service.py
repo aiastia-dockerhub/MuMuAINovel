@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
+import re
 
 from app.models.character import Character
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
@@ -12,6 +13,13 @@ from app.services.prompt_service import PromptService
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _normalize_character_name(name: str) -> str:
+    """归一化角色名称：去除括号后缀（如「影笔（独立制图师）」→「影笔」）"""
+    # 去除中文括号和英文括号及其内容
+    normalized = re.sub(r'[（(][^）)]*[）)]', '', name).strip()
+    return normalized if normalized else name
 
 
 class AutoCharacterService:
@@ -286,9 +294,9 @@ class AutoCharacterService:
                 if not target_name:
                     continue
                 
-                # 查找目标角色
+                # 查找目标角色（使用归一化名称匹配）
                 target_char = next(
-                    (c for c in existing_characters if c.name == target_name),
+                    (c for c in existing_characters if _normalize_character_name(c.name) == _normalize_character_name(target_name)),
                     None
                 )
                 
@@ -378,8 +386,10 @@ class AutoCharacterService:
         logger.info(f"🔍 【角色校验】开始校验大纲中提到的角色是否存在...")
         
         # 1. 从所有大纲的structure中提取角色名称（兼容新旧格式）
-        all_character_names = set()
-        character_context = {}  # 记录角色出现的上下文（大纲摘要）
+        # 使用归一化名称去重：如「影笔」和「影笔（独立制图师）」视为同一角色
+        all_character_names = set()  # 存储归一化后的名称
+        raw_to_normalized = {}  # 原始名称 -> 归一化名称
+        character_context = {}  # 归一化名称 -> 上下文列表
         
         for outline_item in outline_data_list:
             if isinstance(outline_item, dict):
@@ -396,18 +406,22 @@ class AutoCharacterService:
                             # 只处理 character 类型，跳过 organization
                             if entry_type == "organization" or not entry_name.strip():
                                 continue
-                            name = entry_name.strip()
+                            raw_name = entry_name.strip()
                         # 旧格式：纯字符串
                         elif isinstance(char_entry, str) and char_entry.strip():
-                            name = char_entry.strip()
+                            raw_name = char_entry.strip()
                         else:
                             continue
                         
-                        all_character_names.add(name)
-                        # 收集角色出现的上下文
-                        if name not in character_context:
-                            character_context[name] = []
-                        character_context[name].append(f"《{title}》: {summary[:200]}")
+                        # 归一化名称，去除括号后缀
+                        normalized = _normalize_character_name(raw_name)
+                        raw_to_normalized[raw_name] = normalized
+                        all_character_names.add(normalized)
+                        
+                        # 收集角色出现的上下文（按归一化名称合并）
+                        if normalized not in character_context:
+                            character_context[normalized] = []
+                        character_context[normalized].append(f"《{title}》: {summary[:200]}")
         
         if not all_character_names:
             logger.info("🔍 【角色校验】大纲中未提到任何角色，跳过校验")
@@ -424,9 +438,10 @@ class AutoCharacterService:
             select(Character).where(Character.project_id == project_id)
         )
         existing_characters = existing_result.scalars().all()
-        existing_names = {char.name for char in existing_characters}
+        # 使用归一化名称匹配，这样「影笔」和「影笔（独立制图师）」不会重复
+        existing_names = {_normalize_character_name(char.name) for char in existing_characters}
         
-        # 3. 找出缺失的角色
+        # 3. 找出缺失的角色（基于归一化名称匹配）
         missing_names = all_character_names - existing_names
         
         if not missing_names:
