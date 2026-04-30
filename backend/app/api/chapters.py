@@ -1704,7 +1704,9 @@ async def generate_chapter_content_stream(
                     # 如果需要切换provider，需要在前端传递provider参数
                 if reasoning_effort:
                     generate_kwargs["reasoning_effort"] = reasoning_effort
-                    logger.info(f"  🧠 思考模式: reasoning_effort={reasoning_effort}")
+                    # 思考模式下推理 token 会占用 max_tokens，需要翻倍确保输出不被截断
+                    generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 2, 128000)
+                    logger.info(f"  🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
                 
                 # === 生成阶段 ===
                 full_content = ""
@@ -3800,7 +3802,9 @@ async def generate_single_chapter_for_batch(
         logger.info(f"  批量生成使用自定义模型: {custom_model}")
     if reasoning_effort:
         generate_kwargs["reasoning_effort"] = reasoning_effort
-        logger.info(f"  批量生成 🧠 思考模式: reasoning_effort={reasoning_effort}")
+        # 思考模式下推理 token 会占用 max_tokens，需要翻倍确保输出不被截断
+        generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 2, 128000)
+        logger.info(f"  批量生成 🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
     
     # 批量生成中的流式生成（非SSE，不需要修改进度显示）
     async for chunk in ai_service.generate_text_stream(**generate_kwargs):
