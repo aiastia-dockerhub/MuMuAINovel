@@ -2885,6 +2885,24 @@ export default function Chapters() {
                 ))}
               </Select>
             </Form.Item>
+
+            <Form.Item
+              label="思考模式"
+              tooltip="开启后模型会先思考再输出，如果模型不支持会报错，关掉就好"
+              style={{ flex: 1, marginBottom: isMobile ? 16 : 0 }}
+            >
+              <Select
+                placeholder="不使用思考模式"
+                value={skillThinkingMode}
+                onChange={setSkillThinkingMode}
+                allowClear
+                disabled={isGenerating}
+              >
+                <Select.Option value="low">🧠 浅思考</Select.Option>
+                <Select.Option value="medium">🧠 深思考</Select.Option>
+                <Select.Option value="high">🧠 深度思考</Select.Option>
+              </Select>
+            </Form.Item>
           </div>
 
           <Form.Item label="章节内容" name="content">
@@ -2927,20 +2945,6 @@ export default function Chapters() {
                     {skill.template_name}
                   </Select.Option>
                 ))}
-              </Select>
-              <Select
-                placeholder="思考模式"
-                value={skillThinkingMode}
-                onChange={setSkillThinkingMode}
-                allowClear
-                disabled={isGenerating || isApplyingSkill}
-                style={{ minWidth: 110 }}
-                size="small"
-                title="开启后模型会先思考再输出，如果模型不支持会报错，关掉就好"
-              >
-                <Select.Option value="low">🧠 浅思考</Select.Option>
-                <Select.Option value="medium">🧠 深思考</Select.Option>
-                <Select.Option value="high">🧠 深度思考</Select.Option>
               </Select>
               <Button
                 type="primary"
