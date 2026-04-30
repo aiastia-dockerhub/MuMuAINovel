@@ -245,17 +245,25 @@ def _validate_password(password: str):
         raise HTTPException(status_code=400, detail="密码长度至少为6个字符")
 
 
+def _is_session_cookie_secure() -> bool:
+    """判断会话 Cookie 是否启用 Secure 标记。"""
+    if settings.SESSION_COOKIE_SECURE is not None:
+        return settings.SESSION_COOKIE_SECURE
+    return not settings.debug
+
+
 def _set_login_cookies(response: Response, user_id: str):
     """设置登录 Cookie"""
     max_age = settings.SESSION_EXPIRE_MINUTES * 60
     session_token = create_session_token(user_id, max_age)
+    cookie_secure = _is_session_cookie_secure()
     response.set_cookie(
         key="session_token",
         value=session_token,
         max_age=max_age,
         httponly=True,
         samesite="lax",
-        secure=not settings.debug,
+        secure=cookie_secure,
     )
 
     china_now = get_china_now()
@@ -268,7 +276,7 @@ def _set_login_cookies(response: Response, user_id: str):
         max_age=max_age,
         httponly=False,
         samesite="lax",
-        secure=not settings.debug,
+        secure=cookie_secure,
     )
 
 
@@ -693,7 +701,8 @@ async def _handle_callback(
             value="true",
             max_age=300,
             httponly=False,
-            samesite="lax"
+            samesite="lax",
+            secure=_is_session_cookie_secure(),
         )
         logger.info(f"✅ [OAuth登录] 用户 {user.user_id} 首次登录，已设置 first_login 标记")
 

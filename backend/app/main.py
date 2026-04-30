@@ -147,7 +147,7 @@ from app.api import (
     auth, users, settings, writing_styles, memories,
     mcp_plugins, admin, inspiration, prompt_templates,
     changelog, careers, foreshadows, prompt_workshop, book_import,
-    project_covers, tasks, skills
+    project_covers, tasks
 )
 
 app.include_router(auth.router, prefix="/api")
