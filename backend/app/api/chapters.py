@@ -1742,23 +1742,15 @@ async def generate_chapter_content_stream(
                         message=f'正在润色去AI味（{polishing_name}）...'
                     )
                     
-                    # 构建润色 prompt
-                    polishing_system = f"""【⚡ Skill 工作流：{polishing_name}】
+                    # 构建润色 prompt - 直接用 Skill 内容作为指令，不做多阶段拆分
+                    polishing_system = f"""{polishing_content}"""
 
-{polishing_content}
+                    polishing_user_prompt = f"""请对以下章节内容执行润色，只做局部修改，不要整段重写。直接输出润色后的完整正文，不要任何解释。
 
-⚠️ 请严格遵循上述 Skill 工作流指令执行润色！"""
+{full_content}"""
 
-                    polishing_user_prompt = f"""请对以下章节内容进行去AI味润色，按照你的工作流执行（Phase 1 扫描 → Phase 2 诊断 → Phase 3 清除 → Phase 4 输出润色后全文）。
-
-最终只输出润色后的完整章节正文内容，不要输出检测报告、诊断分析等中间过程。
-
----
-{full_content}
----"""
-
-                    # 计算润色的 max_tokens（比原文多一些空间）
-                    polishing_max_tokens = max(2000, min(int(len(full_content) * 3), 16000))
+                    # 润色是局部修改，token 用量接近原文即可，给 1.5 倍空间足够
+                    polishing_max_tokens = max(2000, min(int(len(full_content) * 1.5), 12000))
                     
                     polishing_kwargs = {
                         "prompt": polishing_user_prompt,
@@ -3803,21 +3795,13 @@ async def generate_single_chapter_for_batch(
         polishing_name = polishing_skill["template_name"]
         logger.info(f"✨ 批量生成两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
         
-        polishing_system = f"""【⚡ Skill 工作流：{polishing_name}】
+        polishing_system = f"""{polishing_content}"""
 
-{polishing_content}
+        polishing_user_prompt = f"""请对以下章节内容执行润色，只做局部修改，不要整段重写。直接输出润色后的完整正文，不要任何解释。
 
-⚠️ 请严格遵循上述 Skill 工作流指令执行润色！"""
+{full_content}"""
 
-        polishing_user_prompt = f"""请对以下章节内容进行去AI味润色，按照你的工作流执行（Phase 1 扫描 → Phase 2 诊断 → Phase 3 清除 → Phase 4 输出润色后全文）。
-
-最终只输出润色后的完整章节正文内容，不要输出检测报告、诊断分析等中间过程。
-
----
-{full_content}
----"""
-
-        polishing_max_tokens = max(2000, min(int(len(full_content) * 3), 16000))
+        polishing_max_tokens = max(2000, min(int(len(full_content) * 1.5), 12000))
         
         polishing_kwargs = {
             "prompt": polishing_user_prompt,
