@@ -153,21 +153,6 @@ const ChapterRegenerationModal: React.FC<ChapterRegenerationModalProps> = ({
       setWordCount(0);
 
       // 构建请求数据
-      interface RegenerationRequest {
-        modification_source: string;
-        custom_instructions?: string;
-        selected_suggestion_indices: number[];
-        preserve_elements: {
-          preserve_structure: boolean;
-          preserve_dialogues: string[];
-          preserve_plot_points: string[];
-          preserve_character_traits: boolean;
-        };
-        style_id?: string;
-        target_word_count: number;
-        focus_areas: string[];
-      }
-
       const requestData: Record<string, unknown> = {
         modification_source: values.modification_source,
         custom_instructions: values.custom_instructions,
