@@ -2217,6 +2217,17 @@ async def _run_continue_outline_bg(
         except Exception:
             pass
 
+        # 组织校验
+        try:
+            await _check_and_create_missing_organizations_from_outlines(
+                outline_data=outline_data, project_id=project_id, db=db,
+                user_ai_service=user_ai_service, user_id=user_id,
+                enable_mcp=data.get("enable_mcp", True), tracker=tracker
+            )
+            await db.commit()
+        except Exception:
+            pass
+
     # 保存结果
     result_data = {
         "message": f"成功续写{len(all_new_outlines)}章大纲",
