@@ -11,22 +11,6 @@ logger = get_logger(__name__)
 class OpenAIClient(BaseAIClient):
     """OpenAI API 客户端"""
 
-    # 支持 reasoning_effort 的模型关键词（小写匹配）
-    REASONING_MODEL_PATTERNS = [
-        'o1', 'o3', 'o4',          # OpenAI o 系列
-        'deepseek-r', 'deepseek-reasoner',  # DeepSeek R1
-        'k1', 'moonshot-k1',       # Kimi k1
-        'gemini-2.5',              # Google Gemini 2.5 thinking
-        'qwen3',                   # Qwen3 thinking
-        'claude-3.5', 'claude-3-5', 'claude-4',  # Claude extended thinking
-    ]
-
-    @classmethod
-    def _supports_reasoning_effort(cls, model: str) -> bool:
-        """检查模型是否支持 reasoning_effort 参数"""
-        model_lower = model.lower()
-        return any(pattern in model_lower for pattern in cls.REASONING_MODEL_PATTERNS)
-
     def _build_headers(self) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {self.api_key}",
@@ -49,16 +33,13 @@ class OpenAIClient(BaseAIClient):
             "messages": messages,
             "max_tokens": max_tokens,
         }
-        # 思考模式：仅对支持的模型设置 reasoning_effort + enable_thinking
-        if reasoning_effort and self._supports_reasoning_effort(model):
+        # 思考模式：用户自己选择，不支持的话关掉就好
+        if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
-            # DeepSeek/Qwen 等模型需要 enable_thinking 参数
             payload["enable_thinking"] = True
-            logger.info(f"🧠 模型 {model} 支持思考模式，设置 reasoning_effort={reasoning_effort}")
+            logger.info(f"🧠 思考模式: reasoning_effort={reasoning_effort}")
         else:
             payload["temperature"] = temperature
-            if reasoning_effort:
-                logger.warning(f"⚠️ 模型 {model} 不支持 reasoning_effort，已忽略思考模式")
         if stream:
             payload["stream"] = True
         if tools:
