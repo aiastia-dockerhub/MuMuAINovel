@@ -31,29 +31,29 @@ PERSISTENT_SKILLS_DIR = os.environ.get(
 # Skill 分类定义
 SKILL_TYPES = {
     "writing": {
-        "label": "Skill·写作",
+        "label": "✍️ 写作类",
         "color": "blue",
-        "category_hint": "章节生成时直接注入系统提示词，指导创作风格和叙事方式",
+        "category_hint": "创作章节时注入 → 改变 AI 写作风格（对话、悬念等）",
     },
     "polishing": {
-        "label": "Skill·润色",
+        "label": "✨ 润色类",
         "color": "orange",
-        "category_hint": "章节生成后自动执行两步流程：先生成初稿 → 再按 Skill 规则润色",
+        "category_hint": "生成两次：先写初稿 → 再自动润色去AI味",
     },
     "analysis": {
-        "label": "Skill·分析",
+        "label": "🔍 分析类",
         "color": "green",
-        "category_hint": "在 Skill Chat 对话中使用，或通过章节页「Skill 分析」按钮分析章节内容",
+        "category_hint": "Skill Chat 对话中使用，分析章节内容",
     },
     "tool": {
-        "label": "Skill·工具",
+        "label": "🔧 工具类",
         "color": "purple",
-        "category_hint": "在 Skill Chat 对话中使用，提供浏览器、搜索等辅助工具能力",
+        "category_hint": "Skill Chat 对话中使用，浏览器、搜索等辅助能力",
     },
     "generic": {
-        "label": "Skill",
+        "label": "💬 通用类",
         "color": "default",
-        "category_hint": "通用类型，注入为系统提示词使用",
+        "category_hint": "Skill Chat 对话中使用，通用助手",
     },
 }
 

@@ -27,11 +27,11 @@ interface SkillDetail {
 }
 
 const SKILL_TYPE_OPTIONS = [
-  { value: 'writing', label: 'Skill·写作', hint: '章节生成时直接注入系统提示词，指导创作风格和叙事方式' },
-  { value: 'polishing', label: 'Skill·润色', hint: '章节生成后自动执行两步流程：先生成初稿 → 再按 Skill 规则润色' },
-  { value: 'analysis', label: 'Skill·分析', hint: '在 Skill Chat 对话中使用，或通过章节页「Skill 分析」按钮分析章节内容' },
-  { value: 'tool', label: 'Skill·工具', hint: '在 Skill Chat 对话中使用，提供浏览器、搜索等辅助工具能力' },
-  { value: 'generic', label: 'Skill', hint: '通用类型，注入为系统提示词使用' },
+  { value: 'writing', label: '✍️ 写作类', hint: '创作章节时注入 → 改变 AI 写作风格（对话、悬念等）' },
+  { value: 'polishing', label: '✨ 润色类', hint: '生成两次：先写初稿 → 再自动润色去AI味' },
+  { value: 'analysis', label: '🔍 分析类', hint: 'Skill Chat 对话中使用，分析章节内容' },
+  { value: 'tool', label: '🔧 工具类', hint: 'Skill Chat 对话中使用，浏览器、搜索等辅助能力' },
+  { value: 'generic', label: '💬 通用类', hint: 'Skill Chat 对话中使用，通用助手' },
 ];
 
 export default function SkillManage() {
@@ -223,13 +223,16 @@ export default function SkillManage() {
       width: 200,
       render: (cat: string, record: SkillItem) => {
         const colorMap: Record<string, string> = {
+          '✍️ 写作类': 'blue',
+          '✨ 润色类': 'orange',
+          '🔍 分析类': 'green',
+          '🔧 工具类': 'purple',
+          '💬 通用类': 'default',
           'Skill·写作': 'blue',
           'Skill·润色': 'orange',
           'Skill·分析': 'green',
           'Skill·工具': 'purple',
           'Skill': 'default',
-          'Skill·长篇': 'blue',
-          'Skill·短篇': 'green',
         };
         return (
           <div>
