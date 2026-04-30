@@ -101,6 +101,10 @@ export default function Chapters() {
   const [singleChapterProgress, setSingleChapterProgress] = useState(0);
   const [singleChapterProgressMessage, setSingleChapterProgressMessage] = useState('');
 
+  // Skill 处理已有章节状态
+  const [isApplyingSkill, setIsApplyingSkill] = useState(false);
+  const [applySkillKey, setApplySkillKey] = useState<string | undefined>();
+
 
   // 批量生成相关状态
   const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
@@ -889,6 +893,115 @@ export default function Chapters() {
       message.error('AI创作失败：' + (apiError.response?.data?.detail || apiError.message || '未知错误'));
     } finally {
       setIsContinuing(false);
+      setIsGenerating(false);
+      setSingleChapterProgress(0);
+      setSingleChapterProgressMessage('');
+    }
+  };
+
+  // 对已有章节应用 Skill（润色/去AI味等）
+  const handleApplySkillToChapter = async (skillKey: string) => {
+    if (!editingId) return;
+
+    const currentContent = editorForm.getFieldValue('content');
+    if (!currentContent || currentContent.trim() === '') {
+      message.warning('章节内容为空，无法使用 Skill 处理');
+      return;
+    }
+
+    const skill = availableSkills.find(s => s.template_key === skillKey);
+    if (!skill) {
+      message.error('未找到选中的 Skill');
+      return;
+    }
+
+    try {
+      setIsApplyingSkill(true);
+      setApplySkillKey(skillKey);
+      setIsGenerating(true);
+      setSingleChapterProgress(0);
+      setSingleChapterProgressMessage(`正在使用 ${skill.template_name} 处理章节...`);
+
+      // 调用 apply-to-chapter API（SSE 流式）
+      const response = await fetch('/api/skills/apply-to-chapter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chapter_id: editingId,
+          skill_key: skillKey,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || '处理失败');
+      }
+
+      // 读取 SSE 流
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+
+              if (parsed.type === 'chunk' && parsed.content) {
+                fullContent += parsed.content;
+                editorForm.setFieldsValue({ content: fullContent });
+
+                if (contentTextAreaRef.current) {
+                  const textArea = contentTextAreaRef.current.resizableTextArea?.textArea;
+                  if (textArea) {
+                    textArea.scrollTop = textArea.scrollHeight;
+                  }
+                }
+              } else if (parsed.type === 'progress') {
+                setSingleChapterProgress(parsed.progress || 0);
+                setSingleChapterProgressMessage(parsed.message || '');
+              } else if (parsed.type === 'saved') {
+                message.success('处理完成，已自动保存');
+              } else if (parsed.type === 'error') {
+                throw new Error(parsed.message || '处理失败');
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message !== '处理失败') {
+                // 可能是非JSON数据，尝试作为纯文本chunk
+              }
+            }
+          }
+        }
+      }
+
+      // 刷新章节列表和项目信息
+      await refreshChapters();
+      if (currentProject) {
+        const updatedProject = await projectApi.getProject(currentProject.id);
+        setCurrentProject(updatedProject);
+      }
+
+      message.success(`${skill.template_name} 处理完成！`);
+    } catch (error) {
+      const err = error as Error;
+      message.error('Skill 处理失败：' + (err.message || '未知错误'));
+    } finally {
+      setIsApplyingSkill(false);
+      setApplySkillKey(undefined);
       setIsGenerating(false);
       setSingleChapterProgress(0);
       setSingleChapterProgressMessage('');
@@ -2763,7 +2876,7 @@ export default function Chapters() {
             />
           </Form.Item>
 
-          {/* 局部重写浮动工具栏 */}
+          {/* Skill 处理已有内容 + 局部重写浮动工具栏 */}
           <div data-partial-regenerate-toolbar>
             <PartialRegenerateToolbar
               visible={partialRegenerateToolbarVisible && !isGenerating}
@@ -2772,6 +2885,41 @@ export default function Chapters() {
               onRegenerate={handleOpenPartialRegenerate}
             />
           </div>
+
+          {/* 对已有内容使用 Skill 处理 */}
+          {editingId && availableSkills.filter(s => s.skill_type === 'polishing').length > 0 && (
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: token.colorTextSecondary, whiteSpace: 'nowrap' }}>
+                ⚡ 对已有内容使用 Skill：
+              </span>
+              <Select
+                placeholder="选择 Skill"
+                value={applySkillKey}
+                onChange={setApplySkillKey}
+                allowClear
+                disabled={isGenerating || isApplyingSkill}
+                style={{ minWidth: 180 }}
+                size="small"
+              >
+                {availableSkills.filter(s => s.skill_type === 'polishing').map(skill => (
+                  <Select.Option key={skill.template_key} value={skill.template_key} label={skill.template_name}>
+                    {skill.template_name}
+                  </Select.Option>
+                ))}
+              </Select>
+              <Button
+                type="primary"
+                size="small"
+                icon={<SyncOutlined spin={isApplyingSkill} />}
+                loading={isApplyingSkill}
+                disabled={!applySkillKey || isGenerating || isApplyingSkill}
+                onClick={() => applySkillKey && handleApplySkillToChapter(applySkillKey)}
+                style={{ background: token.colorWarning, borderColor: token.colorWarning }}
+              >
+                {isMobile ? '处理' : 'Skill 处理'}
+              </Button>
+            </div>
+          )}
 
           <Form.Item>
             <Space style={{ width: '100%', justifyContent: 'flex-end', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' }}>
