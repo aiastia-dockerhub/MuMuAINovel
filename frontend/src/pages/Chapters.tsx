@@ -949,6 +949,7 @@ export default function Chapters() {
       const decoder = new TextDecoder();
       let fullContent = '';
       let buffer = '';
+      let completedReceived = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -968,19 +969,13 @@ export default function Chapters() {
 
               if (parsed.type === 'chunk' && parsed.content) {
                 fullContent += parsed.content;
-                editorForm.setFieldsValue({ content: fullContent });
-
-                if (contentTextAreaRef.current) {
-                  const textArea = contentTextAreaRef.current.resizableTextArea?.textArea;
-                  if (textArea) {
-                    textArea.scrollTop = textArea.scrollHeight;
-                  }
-                }
+                // 不实时写入 TextArea，等用户确认后再写入
               } else if (parsed.type === 'progress') {
                 setSingleChapterProgress(parsed.progress || 0);
                 setSingleChapterProgressMessage(parsed.message || '');
               } else if (parsed.type === 'completed') {
                 // 处理完成，弹出对比确认
+                completedReceived = true;
                 setSkillCompareOriginal(currentContent);
                 setSkillCompareResult(parsed.content || fullContent);
                 setSkillCompareSkillName(skill.template_name);
@@ -997,14 +992,20 @@ export default function Chapters() {
         }
       }
 
+      // 如果没有收到 completed 事件（fallback），手动弹出对比
+      if (!completedReceived && fullContent.trim()) {
+        setSkillCompareOriginal(currentContent);
+        setSkillCompareResult(fullContent);
+        setSkillCompareSkillName(skill.template_name);
+        setSkillCompareVisible(true);
+      }
+
       // 刷新章节列表和项目信息
       await refreshChapters();
       if (currentProject) {
         const updatedProject = await projectApi.getProject(currentProject.id);
         setCurrentProject(updatedProject);
       }
-
-      message.success(`${skill.template_name} 处理完成！`);
     } catch (error) {
       const err = error as Error;
       message.error('Skill 处理失败：' + (err.message || '未知错误'));
