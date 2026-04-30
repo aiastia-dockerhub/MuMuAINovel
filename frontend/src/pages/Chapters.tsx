@@ -14,6 +14,7 @@ import { SSELoadingOverlay } from '../components/SSELoadingOverlay';
 import ChapterReader from '../components/ChapterReader';
 import PartialRegenerateToolbar from '../components/PartialRegenerateToolbar';
 import PartialRegenerateModal from '../components/PartialRegenerateModal';
+import ChapterContentComparison from '../components/ChapterContentComparison';
 
 const { TextArea } = Input;
 
@@ -3281,109 +3282,38 @@ export default function Chapters() {
         />
       )}
 
-      {/* Skill 处理对比确认 Modal */}
-      <Modal
-        title={
-          <Space>
-            <SyncOutlined style={{ color: token.colorWarning }} />
-            <span>Skill 处理结果对比 — {skillCompareSkillName}</span>
-          </Space>
-        }
-        open={skillCompareVisible}
-        width={isMobile ? 'calc(100vw - 32px)' : 900}
-        centered
-        closable={false}
-        maskClosable={false}
-        style={isMobile ? {
-          maxWidth: 'calc(100vw - 32px)',
-          margin: '0 auto',
-          padding: '0 16px'
-        } : undefined}
-        styles={{
-          body: {
-            maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(80vh - 130px)',
-            overflowY: 'auto',
-            padding: isMobile ? '12px' : '16px'
-          }
-        }}
-        footer={
-          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={() => {
-              // 放弃：恢复原文
-              editorForm.setFieldsValue({ content: skillCompareOriginal });
+      {/* Skill 处理对比确认 — 使用与章节重新生成相同的对比组件 */}
+      {editingId && skillCompareVisible && (() => {
+        const currentChapter = chapters.find(c => c.id === editingId);
+        return (
+          <ChapterContentComparison
+            visible={skillCompareVisible}
+            onClose={() => {
               setSkillCompareVisible(false);
-              message.info('已放弃处理结果，恢复原文');
-            }}>
-              放弃，保留原文
-            </Button>
-            <Button type="primary" style={{ background: token.colorSuccess, borderColor: token.colorSuccess }} onClick={async () => {
-              // 确认：保存处理结果
+            }}
+            chapterId={editingId}
+            chapterTitle={`${skillCompareSkillName} 处理结果 — ${currentChapter?.title || ''}`}
+            originalContent={skillCompareOriginal}
+            newContent={skillCompareResult}
+            wordCount={skillCompareResult.length}
+            onApply={async () => {
+              // 用户确认应用新内容
               editorForm.setFieldsValue({ content: skillCompareResult });
               setSkillCompareVisible(false);
-
-              // 自动保存到后端
-              if (editingId) {
-                try {
-                  await updateChapter(editingId, { content: skillCompareResult });
-                  await refreshChapters();
-                  if (currentProject) {
-                    const updatedProject = await projectApi.getProject(currentProject.id);
-                    setCurrentProject(updatedProject);
-                  }
-                  message.success('已保存处理结果');
-                } catch {
-                  message.error('保存失败，请手动保存');
-                }
+              await refreshChapters();
+              if (currentProject) {
+                const updatedProject = await projectApi.getProject(currentProject.id);
+                setCurrentProject(updatedProject);
               }
-            }}>
-              ✓ 确认保存
-            </Button>
-          </Space>
-        }
-      >
-        <Alert
-          message={`原文 ${skillCompareOriginal.length} 字 → 处理后 ${skillCompareResult.length} 字（${skillCompareResult.length > skillCompareOriginal.length ? '+' : ''}${skillCompareResult.length - skillCompareOriginal.length}）`}
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
-        <div style={{ display: 'flex', gap: 16, flexDirection: isMobile ? 'column' : 'row' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8, color: token.colorTextSecondary }}>📝 原文</div>
-            <div style={{
-              height: isMobile ? 200 : 400,
-              overflowY: 'auto',
-              padding: 12,
-              background: token.colorBgLayout,
-              borderRadius: token.borderRadius,
-              border: `1px solid ${token.colorBorderSecondary}`,
-              fontSize: 13,
-              lineHeight: 1.8,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              {skillCompareOriginal}
-            </div>
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8, color: token.colorSuccess }}>✨ 处理后</div>
-            <div style={{
-              height: isMobile ? 200 : 400,
-              overflowY: 'auto',
-              padding: 12,
-              background: token.colorBgLayout,
-              borderRadius: token.borderRadius,
-              border: `1px solid ${token.colorSuccess}`,
-              fontSize: 13,
-              lineHeight: 1.8,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              {skillCompareResult}
-            </div>
-          </div>
-        </div>
-      </Modal>
+            }}
+            onDiscard={() => {
+              // 用户放弃新内容
+              editorForm.setFieldsValue({ content: skillCompareOriginal });
+              setSkillCompareVisible(false);
+            }}
+          />
+        );
+      })()}
 
       {/* 规划编辑器 */}
       {editingPlanChapter && currentProject && (() => {
