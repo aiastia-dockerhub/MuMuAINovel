@@ -22,6 +22,29 @@ def _normalize_character_name(name: str) -> str:
     return normalized if normalized else name
 
 
+# 组织名单字后缀
+_ORG_SINGLE_SUFFIXES = frozenset(
+    "帮派门会局阁宗族堂殿宫庄寨堡楼院社团盟党军营队所署寺观庵朝庭府"
+)
+# 组织名双字后缀（如「法则探索者小队」「暗影战队」）
+_ORG_DOUBLE_SUFFIXES = (
+    "小队", "部队", "分队", "战队", "纵队", "小组", "分会", "分部",
+    "总部", "支部", "商会", "公会", "学派", "教派", "家族", "皇朝",
+)
+
+
+def _looks_like_organization(name: str) -> bool:
+    """根据名称推断是否为组织（如「天机阁」「法则探索者小队」「青龙帮」）"""
+    n = name.strip()
+    if len(n) < 2:
+        return False
+    if n[-1] in _ORG_SINGLE_SUFFIXES:
+        return True
+    if len(n) >= 3 and n[-2:] in _ORG_DOUBLE_SUFFIXES:
+        return True
+    return False
+
+
 class AutoCharacterService:
     """自动角色引入服务"""
     
@@ -403,13 +426,21 @@ class AutoCharacterService:
                         if isinstance(char_entry, dict):
                             entry_type = char_entry.get("type", "character")
                             entry_name = char_entry.get("name", "")
-                            # 只处理 character 类型，跳过 organization
+                            # 跳过 organization 类型或空名
                             if entry_type == "organization" or not entry_name.strip():
+                                continue
+                            # 智能推断：AI误标为character的组织名（如「法则探索者小队」）
+                            if _looks_like_organization(entry_name):
+                                logger.info(f"  🔍 智能推断: '{entry_name}' 名称像组织，跳过角色创建（交由组织校验处理）")
                                 continue
                             raw_name = entry_name.strip()
                         # 旧格式：纯字符串
                         elif isinstance(char_entry, str) and char_entry.strip():
                             raw_name = char_entry.strip()
+                            # 旧格式也做智能推断
+                            if _looks_like_organization(raw_name):
+                                logger.info(f"  🔍 智能推断: '{raw_name}' 名称像组织，跳过角色创建")
+                                continue
                         else:
                             continue
                         
