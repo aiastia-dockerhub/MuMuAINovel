@@ -777,7 +777,11 @@ async def characters_generator(
                         characters_data = [characters_data]
                     
                     # 严格验证生成数量是否精确匹配
-                    if len(characters_data) != current_batch_size:
+                    if len(characters_data) > current_batch_size:
+                        # AI多生成了，取前N个即可
+                        logger.warning(f"批次{batch_idx+1}生成数量偏多: 期望{current_batch_size}个, 实际{len(characters_data)}个, 截取前{current_batch_size}个")
+                        characters_data = characters_data[:current_batch_size]
+                    elif len(characters_data) < current_batch_size:
                         error_msg = f"批次{batch_idx+1}生成数量不正确: 期望{current_batch_size}个, 实际{len(characters_data)}个"
                         logger.error(error_msg)
                         
