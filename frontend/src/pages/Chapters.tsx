@@ -104,6 +104,11 @@ export default function Chapters() {
   // Skill 处理已有章节状态
   const [isApplyingSkill, setIsApplyingSkill] = useState(false);
   const [applySkillKey, setApplySkillKey] = useState<string | undefined>();
+  // Skill 处理对比确认
+  const [skillCompareVisible, setSkillCompareVisible] = useState(false);
+  const [skillCompareOriginal, setSkillCompareOriginal] = useState('');
+  const [skillCompareResult, setSkillCompareResult] = useState('');
+  const [skillCompareSkillName, setSkillCompareSkillName] = useState('');
 
 
   // 批量生成相关状态
@@ -974,8 +979,12 @@ export default function Chapters() {
               } else if (parsed.type === 'progress') {
                 setSingleChapterProgress(parsed.progress || 0);
                 setSingleChapterProgressMessage(parsed.message || '');
-              } else if (parsed.type === 'saved') {
-                message.success('处理完成，已自动保存');
+              } else if (parsed.type === 'completed') {
+                // 处理完成，弹出对比确认
+                setSkillCompareOriginal(currentContent);
+                setSkillCompareResult(parsed.content || fullContent);
+                setSkillCompareSkillName(skill.template_name);
+                setSkillCompareVisible(true);
               } else if (parsed.type === 'error') {
                 throw new Error(parsed.message || '处理失败');
               }
@@ -3270,6 +3279,110 @@ export default function Chapters() {
           onApply={handleApplyPartialRegenerate}
         />
       )}
+
+      {/* Skill 处理对比确认 Modal */}
+      <Modal
+        title={
+          <Space>
+            <SyncOutlined style={{ color: token.colorWarning }} />
+            <span>Skill 处理结果对比 — {skillCompareSkillName}</span>
+          </Space>
+        }
+        open={skillCompareVisible}
+        width={isMobile ? 'calc(100vw - 32px)' : 900}
+        centered
+        closable={false}
+        maskClosable={false}
+        style={isMobile ? {
+          maxWidth: 'calc(100vw - 32px)',
+          margin: '0 auto',
+          padding: '0 16px'
+        } : undefined}
+        styles={{
+          body: {
+            maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(80vh - 130px)',
+            overflowY: 'auto',
+            padding: isMobile ? '12px' : '16px'
+          }
+        }}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <Button onClick={() => {
+              // 放弃：恢复原文
+              editorForm.setFieldsValue({ content: skillCompareOriginal });
+              setSkillCompareVisible(false);
+              message.info('已放弃处理结果，恢复原文');
+            }}>
+              放弃，保留原文
+            </Button>
+            <Button type="primary" style={{ background: token.colorSuccess, borderColor: token.colorSuccess }} onClick={async () => {
+              // 确认：保存处理结果
+              editorForm.setFieldsValue({ content: skillCompareResult });
+              setSkillCompareVisible(false);
+
+              // 自动保存到后端
+              if (editingId) {
+                try {
+                  await updateChapter(editingId, { content: skillCompareResult });
+                  await refreshChapters();
+                  if (currentProject) {
+                    const updatedProject = await projectApi.getProject(currentProject.id);
+                    setCurrentProject(updatedProject);
+                  }
+                  message.success('已保存处理结果');
+                } catch {
+                  message.error('保存失败，请手动保存');
+                }
+              }
+            }}>
+              ✓ 确认保存
+            </Button>
+          </Space>
+        }
+      >
+        <Alert
+          message={`原文 ${skillCompareOriginal.length} 字 → 处理后 ${skillCompareResult.length} 字（${skillCompareResult.length > skillCompareOriginal.length ? '+' : ''}${skillCompareResult.length - skillCompareOriginal.length}）`}
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <div style={{ display: 'flex', gap: 16, flexDirection: isMobile ? 'column' : 'row' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: token.colorTextSecondary }}>📝 原文</div>
+            <div style={{
+              height: isMobile ? 200 : 400,
+              overflowY: 'auto',
+              padding: 12,
+              background: token.colorBgLayout,
+              borderRadius: token.borderRadius,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              fontSize: 13,
+              lineHeight: 1.8,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              {skillCompareOriginal}
+            </div>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: token.colorSuccess }}>✨ 处理后</div>
+            <div style={{
+              height: isMobile ? 200 : 400,
+              overflowY: 'auto',
+              padding: 12,
+              background: token.colorBgLayout,
+              borderRadius: token.borderRadius,
+              border: `1px solid ${token.colorSuccess}`,
+              fontSize: 13,
+              lineHeight: 1.8,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              {skillCompareResult}
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* 规划编辑器 */}
       {editingPlanChapter && currentProject && (() => {

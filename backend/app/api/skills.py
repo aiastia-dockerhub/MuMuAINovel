@@ -272,39 +272,13 @@ async def apply_skill_to_chapter(
 
                 await asyncio.sleep(0)
 
-            # 自动保存回章节
+            # 发送完成事件（不自动保存，等前端用户确认）
             if full_content.strip():
-                # 需要新的数据库会话来保存
-                from app.database import get_engine
-                from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as NewAsyncSession
-
-                engine = await get_engine(user_id)
-                AsyncSessionLocal = async_sessionmaker(engine, class_=NewAsyncSession, expire_on_commit=False)
-                async with AsyncSessionLocal() as save_db:
-                    result = await save_db.execute(
-                        select(Chapter).where(Chapter.id == request_body.chapter_id)
-                    )
-                    ch = result.scalar_one_or_none()
-                    if ch:
-                        old_word_count = ch.word_count or 0
-                        new_word_count = len(full_content.strip())
-                        ch.content = full_content.strip()
-                        ch.word_count = new_word_count
-
-                        # 更新项目字数
-                        proj_result = await save_db.execute(
-                            select(Project).where(Project.id == ch.project_id)
-                        )
-                        proj = proj_result.scalar_one_or_none()
-                        if proj:
-                            proj.current_words = (proj.current_words or 0) - old_word_count + new_word_count
-
-                        await save_db.commit()
-                        logger.info(f"✅ Skill '{skill_name}' 处理完成并保存：{old_word_count}字 → {new_word_count}字")
-
-                yield await SSEResponse.send_event("saved", {
-                    "word_count": len(full_content.strip()),
-                    "message": f"处理完成，已自动保存"
+                yield await SSEResponse.send_event("completed", {
+                    "content": full_content.strip(),
+                    "word_count_before": len(chapter_content),
+                    "word_count_after": len(full_content.strip()),
+                    "message": f"处理完成，请确认是否保存"
                 })
 
             yield await SSEResponse.send_progress("处理完成", 100, "success")
