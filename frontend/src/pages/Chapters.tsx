@@ -2905,27 +2905,7 @@ export default function Chapters() {
             </Form.Item>
           </div>
 
-          <Form.Item label="章节内容" name="content">
-            <TextArea
-              ref={contentTextAreaRef}
-              rows={isMobile ? 12 : 20}
-              placeholder="开始写作..."
-              style={{ fontFamily: 'monospace', fontSize: isMobile ? 12 : 14 }}
-              disabled={isGenerating}
-            />
-          </Form.Item>
-
-          {/* Skill 处理已有内容 + 局部重写浮动工具栏 */}
-          <div data-partial-regenerate-toolbar>
-            <PartialRegenerateToolbar
-              visible={partialRegenerateToolbarVisible && !isGenerating}
-              position={partialRegenerateToolbarPosition}
-              selectedText={selectedTextForRegenerate}
-              onRegenerate={handleOpenPartialRegenerate}
-            />
-          </div>
-
-          {/* 对已有内容使用 Skill 处理 */}
+          {/* 对已有内容使用 Skill 处理 — 放在 TextArea 上方，确保始终可见 */}
           {editingId && availableSkills.filter(s => s.skill_type === 'polishing').length > 0 && (
             <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13, color: token.colorTextSecondary, whiteSpace: 'nowrap' }}>
@@ -2959,6 +2939,26 @@ export default function Chapters() {
               </Button>
             </div>
           )}
+
+          <Form.Item label="章节内容" name="content">
+            <TextArea
+              ref={contentTextAreaRef}
+              rows={isMobile ? 12 : 20}
+              placeholder="开始写作..."
+              style={{ fontFamily: 'monospace', fontSize: isMobile ? 12 : 14 }}
+              disabled={isGenerating}
+            />
+          </Form.Item>
+
+          {/* 局部重写浮动工具栏 */}
+          <div data-partial-regenerate-toolbar>
+            <PartialRegenerateToolbar
+              visible={partialRegenerateToolbarVisible && !isGenerating}
+              position={partialRegenerateToolbarPosition}
+              selectedText={selectedTextForRegenerate}
+              onRegenerate={handleOpenPartialRegenerate}
+            />
+          </div>
 
           <Form.Item>
             <Space style={{ width: '100%', justifyContent: 'flex-end', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' }}>
