@@ -1687,7 +1687,7 @@ async def generate_chapter_content_stream(
                 # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
                 # 同时设置上限防止过长，下限确保基本可用
                 calculated_max_tokens = int(target_word_count * 3)
-                calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
+                calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))  # 限制在 2000-32000 之间（思考模式需要更多空间）
                 logger.info(f"📊 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
                 
                 # 准备生成参数
@@ -1704,8 +1704,8 @@ async def generate_chapter_content_stream(
                     # 如果需要切换provider，需要在前端传递provider参数
                 if reasoning_effort:
                     generate_kwargs["reasoning_effort"] = reasoning_effort
-                    # 思考模式下推理 token 会占用 max_tokens，需要翻倍确保输出不被截断
-                    generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 2, 128000)
+                    # 思考模式下推理 token 会占用 max_tokens，需要 3 倍确保输出不被截断
+                    generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 3, 128000)
                     logger.info(f"  🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
                 
                 # === 生成阶段 ===
@@ -2239,7 +2239,7 @@ async def _run_chapter_generation_bg(
 确保在整个章节创作过程中始终保持风格的一致性。"""
 
     calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))
+    calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))
 
     generate_kwargs = {
         "prompt": prompt,
@@ -3784,7 +3784,7 @@ async def generate_single_chapter_for_batch(
     # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
     # 同时设置上限防止过长，下限确保基本可用
     calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
+    calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))  # 限制在 2000-32000 之间（思考模式需要更多空间）
     logger.info(f"📊 批量生成 - 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
     
     # 非流式生成内容
@@ -3802,8 +3802,8 @@ async def generate_single_chapter_for_batch(
         logger.info(f"  批量生成使用自定义模型: {custom_model}")
     if reasoning_effort:
         generate_kwargs["reasoning_effort"] = reasoning_effort
-        # 思考模式下推理 token 会占用 max_tokens，需要翻倍确保输出不被截断
-        generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 2, 128000)
+        # 思考模式下推理 token 会占用 max_tokens，需要 3 倍确保输出不被截断
+        generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 3, 128000)
         logger.info(f"  批量生成 🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
     
     # 批量生成中的流式生成（非SSE，不需要修改进度显示）
