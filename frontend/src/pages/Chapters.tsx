@@ -1138,12 +1138,14 @@ export default function Chapters() {
         style_id: number;
         target_word_count: number;
         model?: string;
+        narrative_perspective?: string;
       } = {
         start_chapter_number: values.startChapterNumber,
         count: values.count,
         enable_analysis: true,
         style_id: styleId,
         target_word_count: wordCount,
+        narrative_perspective: currentProject?.narrative_perspective || undefined,
       };
 
       // 如果有模型参数，添加到请求体中
