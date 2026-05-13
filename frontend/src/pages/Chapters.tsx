@@ -14,6 +14,7 @@ import { SSELoadingOverlay } from '../components/SSELoadingOverlay';
 import ChapterReader from '../components/ChapterReader';
 import PartialRegenerateToolbar from '../components/PartialRegenerateToolbar';
 import PartialRegenerateModal from '../components/PartialRegenerateModal';
+import ChapterContentComparison from '../components/ChapterContentComparison';
 
 const { TextArea } = Input;
 
@@ -65,7 +66,11 @@ export default function Chapters() {
   const [availableModels, setAvailableModels] = useState<Array<{ value: string, label: string }>>([]);
   const [selectedModel, setSelectedModel] = useState<string | undefined>();
   const [batchSelectedModel, setBatchSelectedModel] = useState<string | undefined>(); // 批量生成的模型选择
+  const [batchSelectedSkillKey, setBatchSelectedSkillKey] = useState<string | undefined>(); // 批量生成的Skill选择
+  const [batchSelectedNarrativePerspective, setBatchSelectedNarrativePerspective] = useState<string | undefined>(); // 批量生成的人称选择
   const [temporaryNarrativePerspective, setTemporaryNarrativePerspective] = useState<string | undefined>(); // 临时人称选择
+  const [availableSkills, setAvailableSkills] = useState<Array<{ template_key: string; template_name: string; description: string; category: string; skill_type: string }>>([]);
+  const [selectedSkillKey, setSelectedSkillKey] = useState<string | undefined>();
   const [analysisVisible, setAnalysisVisible] = useState(false);
   const [analysisChapterId, setAnalysisChapterId] = useState<string | null>(null);
   // 分析任务状态管理
@@ -97,6 +102,16 @@ export default function Chapters() {
   // 单章节生成进度状态
   const [singleChapterProgress, setSingleChapterProgress] = useState(0);
   const [singleChapterProgressMessage, setSingleChapterProgressMessage] = useState('');
+
+  // Skill 处理已有章节状态
+  const [isApplyingSkill, setIsApplyingSkill] = useState(false);
+  const [applySkillKey, setApplySkillKey] = useState<string | undefined>();
+  const [skillThinkingMode, setSkillThinkingMode] = useState<string | undefined>(undefined);
+  // Skill 处理对比确认
+  const [skillCompareVisible, setSkillCompareVisible] = useState(false);
+  const [skillCompareOriginal, setSkillCompareOriginal] = useState('');
+  const [skillCompareResult, setSkillCompareResult] = useState('');
+  const [skillCompareSkillName, setSkillCompareSkillName] = useState('');
 
 
   // 批量生成相关状态
@@ -479,6 +494,21 @@ export default function Chapters() {
     }
   };
 
+  // 加载可用的 Skill 列表
+  const loadAvailableSkills = async () => {
+    try {
+      const response = await fetch('/api/skills/list');
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data)) {
+          setAvailableSkills(data);
+        }
+      }
+    } catch (error) {
+      console.error('加载 Skill 列表失败:', error);
+    }
+  };
+
   const loadAvailableModels = async () => {
     try {
       // 从设置API获取用户配置的模型列表
@@ -789,9 +819,11 @@ export default function Chapters() {
       });
       setEditingId(id);
       setTemporaryNarrativePerspective(undefined); // 重置人称选择
+      setSelectedSkillKey(undefined); // 重置Skill选择
       setIsEditorOpen(true);
-      // 打开编辑窗口时加载模型列表
+      // 打开编辑窗口时加载模型列表和Skill列表
       loadAvailableModels();
+      loadAvailableSkills();
     }
   };
 
@@ -841,7 +873,9 @@ export default function Chapters() {
           setSingleChapterProgressMessage(progressMsg);
         },
         selectedModel,  // 传递选中的模型
-        temporaryNarrativePerspective  // 传递临时人称参数
+        temporaryNarrativePerspective,  // 传递临时人称参数
+        selectedSkillKey,  // 传递选中的Skill
+        skillThinkingMode  // 传递思考模式
       );
 
       message.success('AI创作成功，正在分析章节内容...');
@@ -868,6 +902,121 @@ export default function Chapters() {
       message.error('AI创作失败：' + (apiError.response?.data?.detail || apiError.message || '未知错误'));
     } finally {
       setIsContinuing(false);
+      setIsGenerating(false);
+      setSingleChapterProgress(0);
+      setSingleChapterProgressMessage('');
+    }
+  };
+
+  // 对已有章节应用 Skill（润色/去AI味等）
+  const handleApplySkillToChapter = async (skillKey: string) => {
+    if (!editingId) return;
+
+    const currentContent = editorForm.getFieldValue('content');
+    if (!currentContent || currentContent.trim() === '') {
+      message.warning('章节内容为空，无法使用 Skill 处理');
+      return;
+    }
+
+    const skill = availableSkills.find(s => s.template_key === skillKey);
+    if (!skill) {
+      message.error('未找到选中的 Skill');
+      return;
+    }
+
+    try {
+      setIsApplyingSkill(true);
+      setApplySkillKey(skillKey);
+      setIsGenerating(true);
+      setSingleChapterProgress(0);
+      setSingleChapterProgressMessage(`正在使用 ${skill.template_name} 处理章节...`);
+
+      // 调用 apply-to-chapter API（SSE 流式）
+      const response = await fetch('/api/skills/apply-to-chapter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chapter_id: editingId,
+          skill_key: skillKey,
+          thinking_mode: skillThinkingMode || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || '处理失败');
+      }
+
+      // 读取 SSE 流
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
+      let completedReceived = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+
+              if (parsed.type === 'chunk' && parsed.content) {
+                fullContent += parsed.content;
+                // 不实时写入 TextArea，等用户确认后再写入
+              } else if (parsed.type === 'progress') {
+                setSingleChapterProgress(parsed.progress || 0);
+                setSingleChapterProgressMessage(parsed.message || '');
+              } else if (parsed.type === 'completed') {
+                // 处理完成，弹出对比确认
+                completedReceived = true;
+                setSkillCompareOriginal(currentContent);
+                setSkillCompareResult(parsed.content || fullContent);
+                setSkillCompareSkillName(skill.template_name);
+                setSkillCompareVisible(true);
+              } else if (parsed.type === 'error') {
+                throw new Error(parsed.message || '处理失败');
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message !== '处理失败') {
+                // 可能是非JSON数据，尝试作为纯文本chunk
+              }
+            }
+          }
+        }
+      }
+
+      // 如果没有收到 completed 事件（fallback），手动弹出对比
+      if (!completedReceived && fullContent.trim()) {
+        setSkillCompareOriginal(currentContent);
+        setSkillCompareResult(fullContent);
+        setSkillCompareSkillName(skill.template_name);
+        setSkillCompareVisible(true);
+      }
+
+      // 刷新章节列表和项目信息
+      await refreshChapters();
+      if (currentProject) {
+        const updatedProject = await projectApi.getProject(currentProject.id);
+        setCurrentProject(updatedProject);
+      }
+    } catch (error) {
+      const err = error as Error;
+      message.error('Skill 处理失败：' + (err.message || '未知错误'));
+    } finally {
+      setIsApplyingSkill(false);
+      setApplySkillKey(undefined);
       setIsGenerating(false);
       setSingleChapterProgress(0);
       setSingleChapterProgressMessage('');
@@ -1138,6 +1287,9 @@ export default function Chapters() {
         style_id: number;
         target_word_count: number;
         model?: string;
+        skill_key?: string;
+        reasoning_effort?: string;
+        narrative_perspective?: string;
       } = {
         start_chapter_number: values.startChapterNumber,
         count: values.count,
@@ -1152,6 +1304,24 @@ export default function Chapters() {
         console.log('[批量生成] 请求体包含model:', model);
       } else {
         console.log('[批量生成] 请求体不包含model，使用后端默认模型');
+      }
+
+      // 如果有 Skill 参数，添加到请求体中
+      if (batchSelectedSkillKey) {
+        requestBody.skill_key = batchSelectedSkillKey;
+        console.log('[批量生成] 请求体包含skill_key:', batchSelectedSkillKey);
+      }
+
+      // 如果有思考模式，添加到请求体中
+      if (skillThinkingMode) {
+        requestBody.reasoning_effort = skillThinkingMode;
+        console.log('[批量生成] 请求体包含reasoning_effort:', skillThinkingMode);
+      }
+
+      // 如果有人称参数，添加到请求体中
+      if (batchSelectedNarrativePerspective) {
+        requestBody.narrative_perspective = batchSelectedNarrativePerspective;
+        console.log('[批量生成] 请求体包含narrative_perspective:', batchSelectedNarrativePerspective);
       }
 
       console.log('[批量生成] 完整请求体:', JSON.stringify(requestBody, null, 2));
@@ -1341,14 +1511,16 @@ export default function Chapters() {
       return;
     }
 
-    // 打开对话框时加载模型列表，等待完成
+    // 打开对话框时加载模型列表和Skill列表，等待完成
     const defaultModel = await loadAvailableModels();
+    loadAvailableSkills();
 
     console.log('[打开批量生成] defaultModel:', defaultModel);
     console.log('[打开批量生成] selectedStyleId:', selectedStyleId);
 
     // 设置批量生成的模型选择状态
     setBatchSelectedModel(defaultModel || undefined);
+    setBatchSelectedNarrativePerspective(undefined); // 重置人称选择
 
     // 重置表单并设置初始值（使用缓存的字数）
     batchForm.setFieldsValue({
@@ -2632,12 +2804,53 @@ export default function Chapters() {
             </Form.Item>
           </div>
 
-          {/* 第二行：目标字数 + AI模型 */}
+          {/* 第二行：目标字数 + AI模型 + Skill */}
           <div style={{
             display: isMobile ? 'block' : 'flex',
             gap: isMobile ? 0 : 16,
             marginBottom: isMobile ? 16 : 12
           }}>
+            <Form.Item
+              label="应用 Skill"
+              tooltip="选择一个 Skill 工作流指导 AI 创作，不选则使用标准创作流程"
+              style={{ flex: 1, marginBottom: isMobile ? 16 : 0 }}
+            >
+              <Select
+                placeholder="不使用 Skill（标准创作）"
+                value={selectedSkillKey}
+                onChange={setSelectedSkillKey}
+                allowClear
+                disabled={isGenerating}
+                showSearch
+                optionFilterProp="label"
+              >
+                {availableSkills.filter(s => !['analysis', 'tool'].includes(s.skill_type)).map(skill => (
+                  <Select.Option key={skill.template_key} value={skill.template_key} label={skill.template_name}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>{skill.template_name}</span>
+                      <Tag style={{ fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>{skill.category}</Tag>
+                      {skill.skill_type === 'polishing' && (
+                        <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 3px' }}>两步流程</Tag>
+                      )}
+                    </div>
+                  </Select.Option>
+                ))}
+              </Select>
+              {selectedSkillKey && (() => {
+                const skill = availableSkills.find(s => s.template_key === selectedSkillKey);
+                return skill ? (
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    <span style={{ color: token.colorSuccess }}>✓ {skill.description}</span>
+                    {skill.skill_type === 'polishing' && (
+                      <div style={{ color: token.colorWarning, marginTop: 2 }}>
+                        ⚡ 润色类 Skill：先生成初稿，再自动执行去AI味润色
+                      </div>
+                    )}
+                  </div>
+                ) : null;
+              })()}
+            </Form.Item>
+
             <Form.Item
               label="目标字数"
               tooltip="AI生成章节时的目标字数，实际可能略有偏差（修改后会自动记住）"
@@ -2681,7 +2894,60 @@ export default function Chapters() {
                 ))}
               </Select>
             </Form.Item>
+
+            <Form.Item
+              label="思考模式"
+              tooltip="开启后模型会先思考再输出，如果模型不支持会报错，关掉就好"
+              style={{ flex: 1, marginBottom: isMobile ? 16 : 0 }}
+            >
+              <Select
+                placeholder="不使用思考模式"
+                value={skillThinkingMode}
+                onChange={setSkillThinkingMode}
+                allowClear
+                disabled={isGenerating}
+              >
+                <Select.Option value="low">🧠 浅思考</Select.Option>
+                <Select.Option value="medium">🧠 深思考</Select.Option>
+                <Select.Option value="high">🧠 深度思考</Select.Option>
+              </Select>
+            </Form.Item>
           </div>
+
+          {/* 对已有内容使用 Skill 处理 — 放在 TextArea 上方，确保始终可见 */}
+          {editingId && availableSkills.filter(s => s.skill_type === 'polishing').length > 0 && (
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: token.colorTextSecondary, whiteSpace: 'nowrap' }}>
+                ⚡ 对已有内容使用 Skill：
+              </span>
+              <Select
+                placeholder="选择 Skill"
+                value={applySkillKey}
+                onChange={setApplySkillKey}
+                allowClear
+                disabled={isGenerating || isApplyingSkill}
+                style={{ minWidth: 160 }}
+                size="small"
+              >
+                {availableSkills.filter(s => s.skill_type === 'polishing').map(skill => (
+                  <Select.Option key={skill.template_key} value={skill.template_key} label={skill.template_name}>
+                    {skill.template_name}
+                  </Select.Option>
+                ))}
+              </Select>
+              <Button
+                type="primary"
+                size="small"
+                icon={<SyncOutlined spin={isApplyingSkill} />}
+                loading={isApplyingSkill}
+                disabled={!applySkillKey || isGenerating || isApplyingSkill}
+                onClick={() => applySkillKey && handleApplySkillToChapter(applySkillKey)}
+                style={{ background: token.colorWarning, borderColor: token.colorWarning }}
+              >
+                {isMobile ? '处理' : 'Skill 处理'}
+              </Button>
+            </div>
+          )}
 
           <Form.Item label="章节内容" name="content">
             <TextArea
@@ -2913,7 +3179,7 @@ export default function Chapters() {
               </Form.Item>
             </div>
 
-            {/* 第三行：AI模型 + 同步分析 */}
+            {/* 第三行：AI模型 + Skill */}
             <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 0 : 16 }}>
               <Form.Item
                 label="AI模型"
@@ -2937,18 +3203,88 @@ export default function Chapters() {
               </Form.Item>
 
               <Form.Item
-                label="同步分析"
-                name="enableAnalysis"
-                tooltip="必须开启，确保剧情连贯"
-                style={{ marginBottom: 12 }}
+                label="应用 Skill"
+                tooltip="选择一个 Skill 工作流指导批量创作，不选则使用标准创作流程"
+                style={{ flex: 1, marginBottom: 12 }}
               >
-                <Radio.Group disabled>
-                  <Radio value={true}>
-                    <span style={{ fontSize: 12, color: token.colorSuccess }}>✓ 自动更新角色状态</span>
-                  </Radio>
-                </Radio.Group>
+                <Select
+                  placeholder="不使用 Skill（标准创作）"
+                  value={batchSelectedSkillKey}
+                  onChange={setBatchSelectedSkillKey}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                >
+                  {availableSkills.filter(s => !['analysis', 'tool'].includes(s.skill_type)).map(skill => (
+                    <Select.Option key={skill.template_key} value={skill.template_key} label={skill.template_name}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>{skill.template_name}</span>
+                        <Tag style={{ fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>{skill.category}</Tag>
+                        {skill.skill_type === 'polishing' && (
+                          <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 3px' }}>两步流程</Tag>
+                        )}
+                      </div>
+                    </Select.Option>
+                  ))}
+                </Select>
               </Form.Item>
             </div>
+
+            {/* 第四行：叙事角度 + 思考模式 */}
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 0 : 16 }}>
+              <Form.Item
+                label="叙事角度"
+                tooltip="不选则使用项目默认人称设置；第一人称(我)代入感强；第三人称(他/她)更客观；全知视角洞悉一切"
+                style={{ flex: 1, marginBottom: 12 }}
+              >
+                <Select
+                  placeholder={`项目默认: ${getNarrativePerspectiveText(currentProject?.narrative_perspective)}`}
+                  value={batchSelectedNarrativePerspective}
+                  onChange={setBatchSelectedNarrativePerspective}
+                  allowClear
+                >
+                  <Select.Option value="第一人称">第一人称(我)</Select.Option>
+                  <Select.Option value="第三人称">第三人称(他/她)</Select.Option>
+                  <Select.Option value="全知视角">全知视角</Select.Option>
+                </Select>
+                {batchSelectedNarrativePerspective && (
+                  <div style={{ color: token.colorSuccess, fontSize: 12, marginTop: 4 }}>
+                    ✓ {getNarrativePerspectiveText(batchSelectedNarrativePerspective)}
+                  </div>
+                )}
+              </Form.Item>
+
+              <Form.Item
+                label="思考模式"
+                tooltip="开启后模型会先思考再输出，如果模型不支持会报错，关掉就好"
+                style={{ flex: 1, marginBottom: 12 }}
+              >
+                <Select
+                  placeholder="不使用思考模式"
+                  value={skillThinkingMode}
+                  onChange={setSkillThinkingMode}
+                  allowClear
+                >
+                  <Select.Option value="low">🧠 浅思考</Select.Option>
+                  <Select.Option value="medium">🧠 深思考</Select.Option>
+                  <Select.Option value="high">🧠 深度思考</Select.Option>
+                </Select>
+              </Form.Item>
+            </div>
+
+            {/* 同步分析（固定开启） */}
+            <Form.Item
+              label="同步分析"
+              name="enableAnalysis"
+              tooltip="必须开启，确保剧情连贯"
+              style={{ marginBottom: 12 }}
+            >
+              <Radio.Group disabled>
+                <Radio value={true}>
+                  <span style={{ fontSize: 12, color: token.colorSuccess }}>✓ 自动更新角色状态</span>
+                </Radio>
+              </Radio.Group>
+            </Form.Item>
           </Form>
         ) : (
           <div>
@@ -3024,6 +3360,39 @@ export default function Chapters() {
           onApply={handleApplyPartialRegenerate}
         />
       )}
+
+      {/* Skill 处理对比确认 — 使用与章节重新生成相同的对比组件 */}
+      {editingId && skillCompareVisible && (() => {
+        const currentChapter = chapters.find(c => c.id === editingId);
+        return (
+          <ChapterContentComparison
+            visible={skillCompareVisible}
+            onClose={() => {
+              setSkillCompareVisible(false);
+            }}
+            chapterId={editingId}
+            chapterTitle={`${skillCompareSkillName} 处理结果 — ${currentChapter?.title || ''}`}
+            originalContent={skillCompareOriginal}
+            newContent={skillCompareResult}
+            wordCount={skillCompareResult.length}
+            onApply={async () => {
+              // 用户确认应用新内容
+              editorForm.setFieldsValue({ content: skillCompareResult });
+              setSkillCompareVisible(false);
+              await refreshChapters();
+              if (currentProject) {
+                const updatedProject = await projectApi.getProject(currentProject.id);
+                setCurrentProject(updatedProject);
+              }
+            }}
+            onDiscard={() => {
+              // 用户放弃新内容
+              editorForm.setFieldsValue({ content: skillCompareOriginal });
+              setSkillCompareVisible(false);
+            }}
+          />
+        );
+      })()}
 
       {/* 规划编辑器 */}
       {editingPlanChapter && currentProject && (() => {

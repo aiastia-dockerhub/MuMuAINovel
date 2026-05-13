@@ -1348,6 +1348,8 @@ async def generate_chapter_content_stream(
     target_word_count = generate_request.target_word_count or 3000
     custom_model = generate_request.model if hasattr(generate_request, 'model') else None
     temp_narrative_perspective = generate_request.narrative_perspective if hasattr(generate_request, 'narrative_perspective') else None
+    skill_key = generate_request.skill_key if hasattr(generate_request, 'skill_key') else None
+    reasoning_effort = generate_request.reasoning_effort if hasattr(generate_request, 'reasoning_effort') else None
     # 预先验证章节存在性（使用临时会话）
     async for temp_db in get_db(request):
         try:
@@ -1626,7 +1628,53 @@ async def generate_chapter_content_stream(
                 
                 # 🎨 方案一：将写作风格注入到系统提示词（最高优先级）
                 system_prompt_with_style = None
-                if style_content:
+                
+                # ⚡ Skill 支持：当指定 skill_key 时，将 Skill 工作流注入系统提示词
+                polishing_skill = None  # 润色类 Skill 暂存，用于两步流程
+                if skill_key:
+                    try:
+                        from app.services.skill_loader import get_all_skills_cached
+                        skills = get_all_skills_cached()
+                        skill = next((s for s in skills if s["template_key"] == skill_key), None)
+                        if skill:
+                            skill_type = skill.get("skill_type", "generic")
+                            skill_content = skill["content"]
+                            skill_name = skill["template_name"]
+                            
+                            if skill_type == "polishing":
+                                # 润色类 Skill：先正常生成，完成后用 Skill 润色（两步流程）
+                                polishing_skill = skill
+                                # 仍然将写作风格注入（如果有）
+                                if style_content:
+                                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                                logger.info(f"⚡ 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
+                            else:
+                                # 写作类/通用类 Skill：先放写作风格，Skill 放最后
+                                if style_content:
+                                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                                system_prompt_with_style = (system_prompt_with_style or "") + f"""
+
+【⚡ Skill 工作流：{skill_name}】
+
+{skill_content}
+
+⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
+                                logger.info(f"⚡ 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+                        else:
+                            logger.warning(f"⚠️ 未找到 Skill: {skill_key}")
+                    except Exception as skill_err:
+                        logger.warning(f"⚠️ 加载 Skill 失败: {skill_err}")
+                
+                if not system_prompt_with_style and style_content:
                     system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
 
 {style_content}
@@ -1639,7 +1687,7 @@ async def generate_chapter_content_stream(
                 # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
                 # 同时设置上限防止过长，下限确保基本可用
                 calculated_max_tokens = int(target_word_count * 3)
-                calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
+                calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))  # 限制在 2000-32000 之间（思考模式需要更多空间）
                 logger.info(f"📊 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
                 
                 # 准备生成参数
@@ -1654,6 +1702,11 @@ async def generate_chapter_content_stream(
                     generate_kwargs["model"] = custom_model
                     # 注意：这里使用用户配置的AI服务，模型参数会覆盖默认模型
                     # 如果需要切换provider，需要在前端传递provider参数
+                if reasoning_effort:
+                    generate_kwargs["reasoning_effort"] = reasoning_effort
+                    # 思考模式下推理 token 会占用 max_tokens，需要 3 倍确保输出不被截断
+                    generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 3, 128000)
+                    logger.info(f"  🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
                 
                 # === 生成阶段 ===
                 full_content = ""
@@ -1684,6 +1737,72 @@ async def generate_chapter_content_stream(
                         yield await tracker.heartbeat()
                     
                     await asyncio.sleep(0)  # 让出控制权
+                
+                # === 润色阶段（两步流程：润色类 Skill） ===
+                if polishing_skill:
+                    polishing_content = polishing_skill["content"]
+                    polishing_name = polishing_skill["template_name"]
+                    logger.info(f"✨ 两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
+                    
+                    yield await tracker.generating(
+                        current_chars=0,
+                        estimated_total=len(full_content),
+                        message=f'正在润色去AI味（{polishing_name}）...'
+                    )
+                    
+                    # 构建润色 prompt - 直接用 Skill 内容作为指令，不做多阶段拆分
+                    polishing_system = f"""{polishing_content}"""
+
+                    polishing_user_prompt = f"""请对以下章节内容执行润色，只做局部修改，不要整段重写。直接输出润色后的完整正文，不要任何解释。
+
+{full_content}"""
+
+                    # 润色是局部修改，token 用量接近原文即可，给 1.5 倍空间足够
+                    polishing_max_tokens = max(2000, min(int(len(full_content) * 1.5), 12000))
+                    
+                    polishing_kwargs = {
+                        "prompt": polishing_user_prompt,
+                        "system_prompt": polishing_system,
+                        "max_tokens": polishing_max_tokens,
+                    }
+                    if custom_model:
+                        polishing_kwargs["model"] = custom_model
+                    if reasoning_effort:
+                        polishing_kwargs["reasoning_effort"] = reasoning_effort
+                    
+                    polished_content = ""
+                    polish_chunk_count = 0
+                    
+                    async for chunk in user_ai_service.generate_text_stream(**polishing_kwargs):
+                        polished_content += chunk
+                        polish_chunk_count += 1
+                        
+                        # 发送润色内容块（用特殊事件标记）
+                        yield await SSEResponse.send_event('polishing_chunk', {'content': chunk})
+                        
+                        if polish_chunk_count % 5 == 0:
+                            yield await tracker.generating(
+                                current_chars=len(polished_content),
+                                estimated_total=len(full_content),
+                                message=f'润色中... 已处理 {len(polished_content)} 字'
+                            )
+                        
+                        if polish_chunk_count % 20 == 0:
+                            yield await tracker.heartbeat()
+                        
+                        await asyncio.sleep(0)
+                    
+                    # 用润色后的内容替换原始内容
+                    if polished_content.strip():
+                        full_content = polished_content.strip()
+                        logger.info(f"✨ 润色完成：{len(full_content)}字")
+                        # 发送润色完成事件
+                        yield await SSEResponse.send_event('polishing_done', {
+                            'word_count': len(full_content),
+                            'original_word_count': len(full_content),
+                        })
+                    else:
+                        logger.warning(f"⚠️ 润色结果为空，使用原始内容")
                 
                 # === 保存阶段 ===
                 yield await tracker.saving("正在保存章节...", 0.3)
@@ -2120,7 +2239,7 @@ async def _run_chapter_generation_bg(
 确保在整个章节创作过程中始终保持风格的一致性。"""
 
     calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))
+    calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))
 
     generate_kwargs = {
         "prompt": prompt,
@@ -2998,13 +3117,16 @@ async def batch_generate_chapters_in_order(
     
     logger.info(f"📦 创建批量生成任务: {batch_id}, 章节: 第{start_number}-{end_number}章, 预估耗时: {estimated_time}分钟")
     
-    # 启动后台批量生成任务，传递model参数
+    # 启动后台批量生成任务，传递model参数和skill_key
     background_tasks.add_task(
         execute_batch_generation_in_order,
         batch_id=batch_id,
         user_id=user_id,
         ai_service=user_ai_service,
-        custom_model=batch_request.model
+        custom_model=batch_request.model,
+        skill_key=batch_request.skill_key,
+        reasoning_effort=batch_request.reasoning_effort,
+        narrative_perspective=batch_request.narrative_perspective
     )
     
     return BatchGenerateResponse(
@@ -3132,7 +3254,10 @@ async def execute_batch_generation_in_order(
     batch_id: str,
     user_id: str,
     ai_service: AIService,
-    custom_model: Optional[str] = None
+    custom_model: Optional[str] = None,
+    skill_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    narrative_perspective: Optional[str] = None
 ):
     """
     按顺序执行批量生成任务（后台任务）
@@ -3235,7 +3360,10 @@ async def execute_batch_generation_in_order(
                         ai_service=ai_service,
                         write_lock=write_lock,
                         custom_model=custom_model,
-                        previous_summary_context=last_generated_summary
+                        previous_summary_context=last_generated_summary,
+                        skill_key=skill_key,
+                        reasoning_effort=reasoning_effort,
+                        narrative_perspective=narrative_perspective
                     )
                     
                     # 更新上一章摘要，供下一章使用
@@ -3417,7 +3545,10 @@ async def generate_single_chapter_for_batch(
     ai_service: AIService,
     write_lock: Lock,
     custom_model: Optional[str] = None,
-    previous_summary_context: Optional[str] = None
+    previous_summary_context: Optional[str] = None,
+    skill_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    narrative_perspective: Optional[str] = None
 ) -> Optional[str]:
     """
     为批量生成执行单个章节的生成（非流式）
@@ -3503,6 +3634,10 @@ async def generate_single_chapter_for_batch(
     logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memory_count', 0)} 条")
     logger.info(f"  - 总上下文长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
     
+    # 🎭 确定使用的叙事人称（批量生成：临时指定 > 项目默认 > 系统默认）
+    chapter_perspective = narrative_perspective or project.narrative_perspective or '第三人称'
+    logger.info(f"📝 批量生成 - 使用叙事人称: {chapter_perspective} (临时指定: {narrative_perspective}, 项目默认: {project.narrative_perspective})")
+
     # 🚀 根据大纲模式选择提示词模板（批量生成）
     # 统一使用 context_builder 构建的 chapter_context 结果，与单章生成保持一致
     if outline_mode == 'one-to-one':
@@ -3518,7 +3653,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 previous_chapter_content=chapter_context.continuation_point,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
@@ -3537,7 +3672,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -3565,7 +3700,7 @@ async def generate_single_chapter_for_batch(
                 target_word_count=target_word_count,
                 continuation_point=chapter_context.continuation_point,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -3584,7 +3719,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -3597,9 +3732,54 @@ async def generate_single_chapter_for_batch(
     else:
         prompt = base_prompt
     
-    # 🎨 方案一：将写作风格注入到系统提示词（批量生成）
+    # 🎨 将 Skill / 写作风格注入到系统提示词（批量生成）
     system_prompt_with_style = None
-    if style_content:
+    polishing_skill = None  # 润色类 Skill 暂存，用于两步流程
+
+    # ⚡ Skill 支持（批量生成）
+    if skill_key:
+        try:
+            from app.services.skill_loader import get_all_skills_cached
+            skills = get_all_skills_cached()
+            skill = next((s for s in skills if s["template_key"] == skill_key), None)
+            if skill:
+                skill_type = skill.get("skill_type", "generic")
+                skill_content = skill["content"]
+                skill_name = skill["template_name"]
+                
+                if skill_type == "polishing":
+                    # 润色类 Skill：先正常生成，完成后用 Skill 润色（两步流程）
+                    polishing_skill = skill
+                    if style_content:
+                        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                    logger.info(f"⚡ 批量生成 - 润色类 Skill '{skill_name}' 将在生成后执行两步流程")
+                else:
+                    # 写作类/通用类 Skill：先放写作风格，Skill 放最后
+                    if style_content:
+                        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+
+{style_content}
+
+确保在整个章节创作过程中始终保持风格的一致性。"""
+                    system_prompt_with_style = (system_prompt_with_style or "") + f"""
+
+【⚡ Skill 工作流：{skill_name}】
+
+{skill_content}
+
+⚠️ 请严格遵循上述 Skill 工作流指令进行创作！"""
+                    logger.info(f"⚡ 批量生成 - 已将 Skill '{skill_name}' 注入系统提示词（{len(skill_content)}字符）")
+            else:
+                logger.warning(f"⚠️ 批量生成 - 未找到 Skill: {skill_key}")
+        except Exception as skill_err:
+            logger.warning(f"⚠️ 批量生成 - 加载 Skill 失败: {skill_err}")
+
+    if not system_prompt_with_style and style_content:
         system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
 
 {style_content}
@@ -3612,7 +3792,7 @@ async def generate_single_chapter_for_batch(
     # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
     # 同时设置上限防止过长，下限确保基本可用
     calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
+    calculated_max_tokens = max(2000, min(calculated_max_tokens, 32000))  # 限制在 2000-32000 之间（思考模式需要更多空间）
     logger.info(f"📊 批量生成 - 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
     
     # 非流式生成内容
@@ -3628,10 +3808,49 @@ async def generate_single_chapter_for_batch(
     if custom_model:
         generate_kwargs["model"] = custom_model
         logger.info(f"  批量生成使用自定义模型: {custom_model}")
+    if reasoning_effort:
+        generate_kwargs["reasoning_effort"] = reasoning_effort
+        # 思考模式下推理 token 会占用 max_tokens，需要 3 倍确保输出不被截断
+        generate_kwargs["max_tokens"] = min(generate_kwargs["max_tokens"] * 3, 128000)
+        logger.info(f"  批量生成 🧠 思考模式: reasoning_effort={reasoning_effort}，max_tokens 提升到 {generate_kwargs['max_tokens']}")
     
     # 批量生成中的流式生成（非SSE，不需要修改进度显示）
     async for chunk in ai_service.generate_text_stream(**generate_kwargs):
         full_content += chunk
+    
+    # === 润色阶段（两步流程：润色类 Skill - 批量生成） ===
+    if polishing_skill:
+        polishing_content = polishing_skill["content"]
+        polishing_name = polishing_skill["template_name"]
+        logger.info(f"✨ 批量生成两步流程 Step 2：开始使用 '{polishing_name}' 润色（{len(full_content)}字）")
+        
+        polishing_system = f"""{polishing_content}"""
+
+        polishing_user_prompt = f"""请对以下章节内容执行润色，只做局部修改，不要整段重写。直接输出润色后的完整正文，不要任何解释。
+
+{full_content}"""
+
+        polishing_max_tokens = max(2000, min(int(len(full_content) * 1.5), 12000))
+        
+        polishing_kwargs = {
+            "prompt": polishing_user_prompt,
+            "system_prompt": polishing_system,
+            "max_tokens": polishing_max_tokens,
+        }
+        if custom_model:
+            polishing_kwargs["model"] = custom_model
+        if reasoning_effort:
+            polishing_kwargs["reasoning_effort"] = reasoning_effort
+        
+        polished_content = ""
+        async for chunk in ai_service.generate_text_stream(**polishing_kwargs):
+            polished_content += chunk
+        
+        if polished_content.strip():
+            full_content = polished_content.strip()
+            logger.info(f"✨ 批量生成润色完成：{len(full_content)}字")
+        else:
+            logger.warning(f"⚠️ 批量生成润色结果为空，使用原始内容")
     
     # 更新章节内容到数据库（使用锁保护）
     async with write_lock:
