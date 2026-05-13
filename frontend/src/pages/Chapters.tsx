@@ -67,6 +67,7 @@ export default function Chapters() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>();
   const [batchSelectedModel, setBatchSelectedModel] = useState<string | undefined>(); // 批量生成的模型选择
   const [batchSelectedSkillKey, setBatchSelectedSkillKey] = useState<string | undefined>(); // 批量生成的Skill选择
+  const [batchSelectedNarrativePerspective, setBatchSelectedNarrativePerspective] = useState<string | undefined>(); // 批量生成的人称选择
   const [temporaryNarrativePerspective, setTemporaryNarrativePerspective] = useState<string | undefined>(); // 临时人称选择
   const [availableSkills, setAvailableSkills] = useState<Array<{ template_key: string; template_name: string; description: string; category: string; skill_type: string }>>([]);
   const [selectedSkillKey, setSelectedSkillKey] = useState<string | undefined>();
@@ -1288,6 +1289,7 @@ export default function Chapters() {
         model?: string;
         skill_key?: string;
         reasoning_effort?: string;
+        narrative_perspective?: string;
       } = {
         start_chapter_number: values.startChapterNumber,
         count: values.count,
@@ -1314,6 +1316,12 @@ export default function Chapters() {
       if (skillThinkingMode) {
         requestBody.reasoning_effort = skillThinkingMode;
         console.log('[批量生成] 请求体包含reasoning_effort:', skillThinkingMode);
+      }
+
+      // 如果有人称参数，添加到请求体中
+      if (batchSelectedNarrativePerspective) {
+        requestBody.narrative_perspective = batchSelectedNarrativePerspective;
+        console.log('[批量生成] 请求体包含narrative_perspective:', batchSelectedNarrativePerspective);
       }
 
       console.log('[批量生成] 完整请求体:', JSON.stringify(requestBody, null, 2));
@@ -1512,6 +1520,7 @@ export default function Chapters() {
 
     // 设置批量生成的模型选择状态
     setBatchSelectedModel(defaultModel || undefined);
+    setBatchSelectedNarrativePerspective(undefined); // 重置人称选择
 
     // 重置表单并设置初始值（使用缓存的字数）
     batchForm.setFieldsValue({
@@ -3221,8 +3230,30 @@ export default function Chapters() {
               </Form.Item>
             </div>
 
-            {/* 第四行：思考模式 */}
+            {/* 第四行：叙事角度 + 思考模式 */}
             <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 0 : 16 }}>
+              <Form.Item
+                label="叙事角度"
+                tooltip="不选则使用项目默认人称设置；第一人称(我)代入感强；第三人称(他/她)更客观；全知视角洞悉一切"
+                style={{ flex: 1, marginBottom: 12 }}
+              >
+                <Select
+                  placeholder={`项目默认: ${getNarrativePerspectiveText(currentProject?.narrative_perspective)}`}
+                  value={batchSelectedNarrativePerspective}
+                  onChange={setBatchSelectedNarrativePerspective}
+                  allowClear
+                >
+                  <Select.Option value="第一人称">第一人称(我)</Select.Option>
+                  <Select.Option value="第三人称">第三人称(他/她)</Select.Option>
+                  <Select.Option value="全知视角">全知视角</Select.Option>
+                </Select>
+                {batchSelectedNarrativePerspective && (
+                  <div style={{ color: token.colorSuccess, fontSize: 12, marginTop: 4 }}>
+                    ✓ {getNarrativePerspectiveText(batchSelectedNarrativePerspective)}
+                  </div>
+                )}
+              </Form.Item>
+
               <Form.Item
                 label="思考模式"
                 tooltip="开启后模型会先思考再输出，如果模型不支持会报错，关掉就好"

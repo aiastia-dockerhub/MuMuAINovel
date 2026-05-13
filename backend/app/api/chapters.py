@@ -3125,7 +3125,8 @@ async def batch_generate_chapters_in_order(
         ai_service=user_ai_service,
         custom_model=batch_request.model,
         skill_key=batch_request.skill_key,
-        reasoning_effort=batch_request.reasoning_effort
+        reasoning_effort=batch_request.reasoning_effort,
+        narrative_perspective=batch_request.narrative_perspective
     )
     
     return BatchGenerateResponse(
@@ -3255,7 +3256,8 @@ async def execute_batch_generation_in_order(
     ai_service: AIService,
     custom_model: Optional[str] = None,
     skill_key: Optional[str] = None,
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[str] = None,
+    narrative_perspective: Optional[str] = None
 ):
     """
     按顺序执行批量生成任务（后台任务）
@@ -3360,7 +3362,8 @@ async def execute_batch_generation_in_order(
                         custom_model=custom_model,
                         previous_summary_context=last_generated_summary,
                         skill_key=skill_key,
-                        reasoning_effort=reasoning_effort
+                        reasoning_effort=reasoning_effort,
+                        narrative_perspective=narrative_perspective
                     )
                     
                     # 更新上一章摘要，供下一章使用
@@ -3544,7 +3547,8 @@ async def generate_single_chapter_for_batch(
     custom_model: Optional[str] = None,
     previous_summary_context: Optional[str] = None,
     skill_key: Optional[str] = None,
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[str] = None,
+    narrative_perspective: Optional[str] = None
 ) -> Optional[str]:
     """
     为批量生成执行单个章节的生成（非流式）
@@ -3630,6 +3634,10 @@ async def generate_single_chapter_for_batch(
     logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memory_count', 0)} 条")
     logger.info(f"  - 总上下文长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
     
+    # 🎭 确定使用的叙事人称（批量生成：临时指定 > 项目默认 > 系统默认）
+    chapter_perspective = narrative_perspective or project.narrative_perspective or '第三人称'
+    logger.info(f"📝 批量生成 - 使用叙事人称: {chapter_perspective} (临时指定: {narrative_perspective}, 项目默认: {project.narrative_perspective})")
+
     # 🚀 根据大纲模式选择提示词模板（批量生成）
     # 统一使用 context_builder 构建的 chapter_context 结果，与单章生成保持一致
     if outline_mode == 'one-to-one':
@@ -3645,7 +3653,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 previous_chapter_content=chapter_context.continuation_point,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
@@ -3664,7 +3672,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -3692,7 +3700,7 @@ async def generate_single_chapter_for_batch(
                 target_word_count=target_word_count,
                 continuation_point=chapter_context.continuation_point,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
@@ -3711,7 +3719,7 @@ async def generate_single_chapter_for_batch(
                 chapter_outline=chapter_context.chapter_outline,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
-                narrative_perspective=project.narrative_perspective or '第三人称',
+                narrative_perspective=chapter_perspective,
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
