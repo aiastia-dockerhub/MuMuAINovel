@@ -53,16 +53,14 @@ jobs:
         with:
           images: ${{ env.DOCKER_IMAGE }}
           tags: |
-            # 对于main/master分支，打latest标签
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            # skill 分支打 latest 标签
+            type=raw,value=latest
             # 对于tag，使用版本号
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            # 使用分支名
-            type=ref,event=branch
-            # 使用commit SHA
-            type=sha,prefix=sha-
+            # 固定分支名为 skill
+            type=raw,value=skill
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
