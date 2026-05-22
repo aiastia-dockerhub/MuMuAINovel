@@ -12,6 +12,8 @@ on:
         description: '源代码分支（默认 skill）'
         required: false
         default: 'skill'
+  repository_dispatch:  # skill 分支 push 后由 pre-push hook 自动触发
+    types: [build-docker]
 
 env:
   DOCKER_IMAGE: aiastia/mumuainovel
