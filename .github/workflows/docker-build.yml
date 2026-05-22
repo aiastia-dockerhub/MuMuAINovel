@@ -12,6 +12,8 @@ on:
         description: '源代码分支'
         required: false
         default: 'skill'
+  repository_dispatch:  # 允许外部事件触发（如 skill 分支 push 后自动触发）
+    types: [build-docker]
 
 env:
   DOCKER_IMAGE: aiastia/mumuainovel
@@ -25,7 +27,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.source_branch || 'skill' }}
+          ref: ${{ github.event.inputs.source_branch || github.event.client_payload.source_branch || 'skill' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
