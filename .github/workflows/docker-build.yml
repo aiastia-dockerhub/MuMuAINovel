@@ -6,14 +6,12 @@ on:
       - docker-build
     tags:
       - 'v*'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:  # 允许手动触发（GitHub Actions 页面点击 "Run workflow"）
     inputs:
       source_branch:
-        description: '源代码分支'
+        description: '源代码分支（默认 skill）'
         required: false
         default: 'skill'
-  repository_dispatch:  # 允许外部事件触发（如 skill 分支 push 后自动触发）
-    types: [build-docker]
 
 env:
   DOCKER_IMAGE: aiastia/mumuainovel
