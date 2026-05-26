@@ -1,5 +1,5 @@
 """
-LinuxDO OAuth2 服务
+OAuth2 服务 - LinuxDO + Casdoor
 """
 import logging
 import httpx
@@ -162,4 +162,133 @@ class LinuxDOOAuthService:
             print(f"获取用户信息异常: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
+            return None
+
+
+class CasdoorOAuthService:
+    """Casdoor OAuth2 服务类"""
+    
+    def __init__(self):
+        self.client_id = settings.CASDOOR_CLIENT_ID
+        self.client_secret = settings.CASDOOR_CLIENT_SECRET
+        self.endpoint = settings.CASDOOR_ENDPOINT
+        self.organization = settings.CASDOOR_ORGANIZATION
+        self.redirect_uri = settings.CASDOOR_REDIRECT_URI
+        
+        # 如果未配置回调地址，使用默认值
+        if not self.redirect_uri:
+            self.redirect_uri = "http://localhost:8000/api/auth/casdoor/callback"
+            logger.warning(
+                "⚠️  CASDOOR_REDIRECT_URI 未配置，使用默认值: http://localhost:8000/api/auth/casdoor/callback\n"
+                "如需使用 Casdoor OAuth 登录，请在 .env 文件中配置。"
+            )
+        
+        if not settings.debug and self.redirect_uri and "localhost" in self.redirect_uri.lower():
+            logger.warning(
+                f"⚠️  生产环境检测到使用 localhost 作为 Casdoor 回调地址: {self.redirect_uri}\n"
+                "这可能导致OAuth回调失败！请使用实际的域名或服务器IP。"
+            )
+    
+    @property
+    def is_configured(self) -> bool:
+        """检查 Casdoor 是否已完整配置"""
+        return bool(self.client_id and self.client_secret and self.endpoint)
+    
+    def generate_state(self) -> str:
+        """生成随机 state 参数"""
+        return secrets.token_urlsafe(32)
+    
+    def get_authorization_url(self, state: str) -> str:
+        """
+        获取 Casdoor 授权 URL
+        
+        Args:
+            state: 随机 state 参数
+            
+        Returns:
+            授权 URL
+        """
+        endpoint = self.endpoint.rstrip('/')
+        params = {
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
+            "response_type": "code",
+            "scope": "openid profile email",
+            "state": state,
+        }
+        
+        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+        return f"{endpoint}/login/oauth/authorize?{query_string}"
+    
+    async def get_access_token(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        使用授权码获取访问令牌
+        
+        Args:
+            code: 授权码
+            
+        Returns:
+            包含 access_token 的字典,失败返回 None
+        """
+        endpoint = self.endpoint.rstrip('/')
+        token_url = f"{endpoint}/api/login/oauth/access_token"
+        
+        data = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": self.redirect_uri,
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    token_url,
+                    json=data,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.error(f"Casdoor 获取访问令牌失败: {response.status_code} {response.text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Casdoor 获取访问令牌异常: {e}")
+            return None
+    
+    async def get_user_info(self, access_token: str) -> Optional[Dict[str, Any]]:
+        """
+        使用访问令牌获取用户信息
+        
+        Args:
+            access_token: 访问令牌
+            
+        Returns:
+            用户信息字典,失败返回 None
+        """
+        endpoint = self.endpoint.rstrip('/')
+        userinfo_url = f"{endpoint}/api/userinfo"
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(userinfo_url, headers=headers)
+                
+                if response.status_code == 200:
+                    user_data = response.json()
+                    logger.info(f"Casdoor 用户信息获取成功: {user_data.get('name', 'unknown')}")
+                    return user_data
+                else:
+                    logger.error(f"Casdoor 获取用户信息失败: {response.status_code} {response.text[:200]}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Casdoor 获取用户信息异常: {type(e).__name__}: {str(e)}")
             return None

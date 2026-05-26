@@ -37,6 +37,7 @@ const { Title, Paragraph, Text } = Typography;
 interface AuthConfig {
   local_auth_enabled: boolean;
   linuxdo_enabled: boolean;
+  casdoor_enabled: boolean;
   email_auth_enabled: boolean;
   email_register_enabled: boolean;
 }
@@ -74,6 +75,7 @@ export default function Login() {
   const [authConfig, setAuthConfig] = useState<AuthConfig>({
     local_auth_enabled: false,
     linuxdo_enabled: false,
+    casdoor_enabled: false,
     email_auth_enabled: false,
     email_register_enabled: false,
   });
@@ -96,6 +98,7 @@ export default function Login() {
 
   const localAuthEnabled = authConfig.local_auth_enabled;
   const linuxdoEnabled = authConfig.linuxdo_enabled;
+  const casdoorEnabled = authConfig.casdoor_enabled;
   const emailAuthEnabled = authConfig.email_auth_enabled;
   const emailRegisterEnabled = authConfig.email_register_enabled;
 
@@ -143,6 +146,7 @@ export default function Login() {
           setAuthConfig({
             local_auth_enabled: false,
             linuxdo_enabled: true,
+            casdoor_enabled: false,
             email_auth_enabled: false,
             email_register_enabled: false,
           });
@@ -300,6 +304,24 @@ export default function Login() {
     }
   };
 
+  const handleCasdoorLogin = async () => {
+    try {
+      setLoading(true);
+      const response = await authApi.getCasdoorAuthUrl();
+
+      const redirect = searchParams.get('redirect');
+      if (redirect) {
+        sessionStorage.setItem('login_redirect', redirect);
+      }
+
+      window.location.href = response.auth_url;
+    } catch (error) {
+      console.error('获取 Casdoor 授权地址失败:', error);
+      message.error('获取授权地址失败，请稍后重试');
+      setLoading(false);
+    }
+  };
+
   const handleAnnouncementClose = () => {
     setShowAnnouncement(false);
     const redirect = searchParams.get('redirect') || '/';
@@ -408,12 +430,7 @@ export default function Login() {
         </Form.Item>
       </Form>
 
-      {linuxdoEnabled ? (
-        <>
-          <Divider style={{ margin: '18px 0 16px' }}>第三方登录</Divider>
-          {renderLinuxDOLogin()}
-        </>
-      ) : null}
+      {renderOAuthLogins()}
     </>
   );
 
@@ -760,6 +777,58 @@ export default function Login() {
       </Button>
     </div>
   );
+
+  const renderCasdoorLogin = () => (
+    <div>
+      <Button
+        size="large"
+        icon={<SafetyCertificateOutlined />}
+        loading={loading}
+        onClick={handleCasdoorLogin}
+        block
+        style={{
+          height: 46,
+          fontSize: 16,
+          fontWeight: 600,
+          background: `linear-gradient(90deg, #1677ff 0%, #69b1ff 100%)`,
+          color: '#fff',
+          border: 'none',
+          borderRadius: '12px',
+          boxShadow: `0 8px 20px ${alphaColor('#1677ff', 0.28)}`,
+          transition: 'all 0.3s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-2px)';
+          e.currentTarget.style.boxShadow = `0 12px 28px ${alphaColor('#1677ff', 0.36)}`;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = `0 8px 20px ${alphaColor('#1677ff', 0.28)}`;
+        }}
+      >
+        使用 Casdoor SSO 登录
+      </Button>
+    </div>
+  );
+
+  const renderOAuthLogins = () => {
+    const providers = [];
+    if (linuxdoEnabled) {
+      providers.push(renderLinuxDOLogin());
+    }
+    if (casdoorEnabled) {
+      providers.push(renderCasdoorLogin());
+    }
+    if (providers.length === 0) return null;
+    return (
+      <>
+        <Divider style={{ margin: '18px 0 16px' }}>第三方登录</Divider>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {providers}
+        </Space>
+      </>
+    );
+  };
 
   const authTabs = [
     ...(localAuthEnabled

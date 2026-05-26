@@ -159,6 +159,7 @@ export const authApi = {
   getAuthConfig: () => api.get<unknown, {
     local_auth_enabled: boolean;
     linuxdo_enabled: boolean;
+    casdoor_enabled: boolean;
     email_auth_enabled: boolean;
     email_register_enabled: boolean;
   }>('/auth/config'),
@@ -182,6 +183,8 @@ export const authApi = {
     api.post<unknown, { success: boolean; message: string }>('/auth/email/reset-password', payload),
 
   getLinuxDOAuthUrl: () => api.get<unknown, AuthUrlResponse>('/auth/linuxdo/url'),
+
+  getCasdoorAuthUrl: () => api.get<unknown, AuthUrlResponse>('/auth/casdoor/url'),
 
   getCurrentUser: () => api.get<unknown, User>('/auth/user'),
 

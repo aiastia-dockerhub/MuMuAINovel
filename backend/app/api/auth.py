@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.services.oauth_service import LinuxDOOAuthService
+from app.services.oauth_service import LinuxDOOAuthService, CasdoorOAuthService
 from app.user_manager import user_manager, User as UserDTO
 from app.user_password import password_manager
 from app.logger import get_logger
@@ -38,8 +38,10 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 # OAuth2 服务实例
 oauth_service = LinuxDOOAuthService()
+casdoor_oauth_service = CasdoorOAuthService()
 
 # State 临时存储（生产环境应使用 Redis）
+# 使用 provider 前缀区分不同 OAuth 的 state
 _state_storage = {}
 
 # 邮箱验证码临时存储（生产环境应使用 Redis）
@@ -339,6 +341,7 @@ async def get_auth_config():
     return {
         "local_auth_enabled": settings.LOCAL_AUTH_ENABLED,
         "linuxdo_enabled": bool(settings.LINUXDO_CLIENT_ID and settings.LINUXDO_CLIENT_SECRET),
+        "casdoor_enabled": casdoor_oauth_service.is_configured,
         "email_auth_enabled": runtime["email_auth_enabled"],
         "email_register_enabled": runtime["email_register_enabled"],
     }
@@ -632,9 +635,96 @@ async def get_linuxdo_auth_url():
     state = oauth_service.generate_state()
     auth_url = oauth_service.get_authorization_url(state)
 
-    _state_storage[state] = True
+    _state_storage[state] = {"provider": "linuxdo"}
 
     return AuthUrlResponse(auth_url=auth_url, state=state)
+
+
+@router.get("/casdoor/url", response_model=AuthUrlResponse)
+async def get_casdoor_auth_url():
+    """获取 Casdoor 授权 URL"""
+    if not casdoor_oauth_service.is_configured:
+        raise HTTPException(status_code=400, detail="Casdoor OAuth 未配置")
+
+    state = casdoor_oauth_service.generate_state()
+    auth_url = casdoor_oauth_service.get_authorization_url(state)
+
+    _state_storage[state] = {"provider": "casdoor"}
+
+    return AuthUrlResponse(auth_url=auth_url, state=state)
+
+
+@router.get("/casdoor/callback")
+async def casdoor_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    response: Response = None
+):
+    """Casdoor OAuth2 回调处理"""
+    if error:
+        raise HTTPException(status_code=400, detail=f"授权失败: {error}")
+
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="缺少 code 或 state 参数")
+
+    state_data = _state_storage.get(state)
+    if not state_data or state_data.get("provider") != "casdoor":
+        raise HTTPException(status_code=400, detail="无效的 state 参数")
+
+    del _state_storage[state]
+
+    token_data = await casdoor_oauth_service.get_access_token(code)
+    if not token_data or "access_token" not in token_data:
+        raise HTTPException(status_code=400, detail="获取访问令牌失败")
+
+    access_token = token_data["access_token"]
+
+    user_info = await casdoor_oauth_service.get_user_info(access_token)
+    if not user_info:
+        raise HTTPException(status_code=400, detail="获取用户信息失败")
+
+    # Casdoor userinfo 返回的字段: sub, name, displayName, email, avatar, etc.
+    casdoor_id = str(user_info.get("sub", user_info.get("name", "")))
+    username = user_info.get("name", user_info.get("preferred_username", ""))
+    display_name = user_info.get("displayName", user_info.get("name", username))
+    avatar_url = user_info.get("picture", user_info.get("avatar", None))
+
+    # 使用 casdoor_ 前缀生成唯一 user_id，与 LinuxDO 用户区分
+    user_id = f"casdoor_{hashlib.md5(casdoor_id.encode()).hexdigest()[:16]}"
+
+    user = await user_manager.create_or_update_from_linuxdo(
+        linuxdo_id=user_id,
+        username=username,
+        display_name=display_name,
+        avatar_url=avatar_url,
+        trust_level=1
+    )
+
+    is_first_login = not await password_manager.has_password(user.user_id)
+    if is_first_login:
+        logger.info(f"用户 {user.user_id} ({username}) 首次通过 Casdoor 登录，需要初始化密码")
+
+    frontend_url = settings.FRONTEND_URL.rstrip('/')
+    redirect_url = f"{frontend_url}/auth/callback"
+    logger.info(f"Casdoor OAuth 回调成功，重定向到前端: {redirect_url}")
+    redirect_response = RedirectResponse(url=redirect_url)
+
+    _set_login_cookies(redirect_response, user.user_id)
+    logger.info(f"✅ [Casdoor OAuth登录] 用户 {user.user_id} 登录成功，会话有效期 {settings.SESSION_EXPIRE_MINUTES} 分钟")
+
+    if is_first_login:
+        redirect_response.set_cookie(
+            key="first_login",
+            value="true",
+            max_age=300,
+            httponly=False,
+            samesite="lax",
+            secure=_is_session_cookie_secure(),
+        )
+        logger.info(f"✅ [Casdoor OAuth登录] 用户 {user.user_id} 首次登录，已设置 first_login 标记")
+
+    return redirect_response
 
 
 async def _handle_callback(

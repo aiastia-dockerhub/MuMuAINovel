@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     # 示例: http://127.0.0.1:7890
     LINUXDO_PROXY_URL: Optional[str] = None
     
+    # Casdoor OAuth2 配置
+    CASDOOR_CLIENT_ID: Optional[str] = None
+    CASDOOR_CLIENT_SECRET: Optional[str] = None
+    # Casdoor 服务器地址（如 https://door.casdoor.com）
+    CASDOOR_ENDPOINT: Optional[str] = None
+    # Casdoor 组织名称
+    CASDOOR_ORGANIZATION: str = "built-in"
+    # Casdoor 回调地址
+    CASDOOR_REDIRECT_URI: Optional[str] = None
+    
     # 前端URL配置（用于OAuth回调后重定向）
     # 本地开发: http://localhost:8000
     # 生产环境: https://your-domain.com 或 http://your-ip:8000
