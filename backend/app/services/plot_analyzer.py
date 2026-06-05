@@ -538,14 +538,46 @@ class PlotAnalyzer:
         """
         try:
             lines = ["=== 章节分析报告 ===\n"]
-            
-            # 整体评分
-            scores = analysis.get('scores', {})
+
+            # 整体评分 - 动态遍历所有评分维度（支持任意数量）
+            # 按固定顺序展示已知维度，再展示未知（自定义）维度
+            scores = analysis.get('scores', {}) or {}
             lines.append(f"【整体评分】")
-            lines.append(f"  整体质量: {scores.get('overall', 'N/A')}/10")
-            lines.append(f"  节奏把控: {scores.get('pacing', 'N/A')}/10")
-            lines.append(f"  吸引力: {scores.get('engagement', 'N/A')}/10")
-            lines.append(f"  连贯性: {scores.get('coherence', 'N/A')}/10\n")
+            
+            # 已知评分维度的展示顺序（含番茄平台维度）
+            KNOWN_SCORE_ORDER = [
+                ('overall', '整体质量'),
+                ('pacing', '节奏把控'),
+                ('engagement', '吸引力'),
+                ('coherence', '连贯性'),
+                # 番茄平台评分维度（可选）
+                ('attraction', '番茄吸量力'),
+                ('retention', '番茄留存力'),
+                ('bookmark_ratio', '番茄追更比潜力'),
+            ]
+            
+            shown_keys = set()
+            for key, label in KNOWN_SCORE_ORDER:
+                val = scores.get(key)
+                if val is not None and val != '':
+                    try:
+                        lines.append(f"  {label}: {float(val):.1f}/10")
+                        shown_keys.add(key)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 兜底：如果没有任何已知维度，回退到旧逻辑（避免空段落）
+            if not shown_keys:
+                lines.append(f"  整体质量: {scores.get('overall', 'N/A')}/10")
+                lines.append(f"  节奏把控: {scores.get('pacing', 'N/A')}/10")
+                lines.append(f"  吸引力: {scores.get('engagement', 'N/A')}/10")
+                lines.append(f"  连贯性: {scores.get('coherence', 'N/A')}/10")
+            
+            # 评分理由
+            justification = scores.get('score_justification') or scores.get('justification')
+            if justification:
+                lines.append(f"  评分理由: {justification}")
+            lines.append("")
             
             # 剧情阶段
             lines.append(f"【剧情阶段】{analysis.get('plot_stage', '未知')}\n")

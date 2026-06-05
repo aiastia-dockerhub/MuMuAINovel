@@ -377,37 +377,68 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
                 )}
 
                 <Card title="整体评分" style={{ marginBottom: 16 }} size={isMobile ? 'small' : 'default'}>
-                  <Row gutter={isMobile ? 8 : 16}>
-                    <Col span={isMobile ? 12 : 6}>
-                      <Statistic
-                        title="整体质量"
-                        value={analysis_data.overall_quality_score || 0}
-                        suffix="/ 10"
-                        valueStyle={{ color: 'var(--color-success)' }}
-                      />
-                    </Col>
-                    <Col span={isMobile ? 12 : 6}>
-                      <Statistic
-                        title="节奏把控"
-                        value={analysis_data.pacing_score || 0}
-                        suffix="/ 10"
-                      />
-                    </Col>
-                    <Col span={isMobile ? 12 : 6}>
-                      <Statistic
-                        title="吸引力"
-                        value={analysis_data.engagement_score || 0}
-                        suffix="/ 10"
-                      />
-                    </Col>
-                    <Col span={isMobile ? 12 : 6}>
-                      <Statistic
-                        title="连贯性"
-                        value={analysis_data.coherence_score || 0}
-                        suffix="/ 10"
-                      />
-                    </Col>
-                  </Row>
+                  {(() => {
+                    // 动态解析 analysis_report 中的【整体评分】段落
+                    // 支持 4 个、5 个、6 个等任意数量评分维度（保持数据库不变）
+                    const reportScores: { label: string; value: number }[] = (() => {
+                      const report = analysis_data.analysis_report || '';
+                      // 提取【整体评分】到下一个【xxx】或空行之间的内容
+                      const blockMatch = report.match(/【整体评分】[\s\S]*?(?=\n【|\n\s*\n|$)/);
+                      if (!blockMatch) return [];
+                      const block = blockMatch[0];
+                      // 每行格式: "  维度名: 数值/10"
+                      const lines = block.split('\n');
+                      const items: { label: string; value: number }[] = [];
+                      for (const line of lines) {
+                        // 跳过段落标题和"评分理由"
+                        if (line.includes('【整体评分】') || line.includes('评分理由')) continue;
+                        const m = line.match(/^\s*([^:：]+)[:：]\s*([\d.]+)/);
+                        if (m) {
+                          const label = m[1].trim();
+                          const value = parseFloat(m[2]);
+                          if (!isNaN(value) && label) {
+                            items.push({ label, value });
+                          }
+                        }
+                      }
+                      return items;
+                    })();
+
+                    // 合并：优先用 report 解析出的，否则降级到固定4字段（兼容老数据）
+                    const scoreItems = reportScores.length > 0
+                      ? reportScores
+                      : [
+                          { label: '整体质量', value: analysis_data.overall_quality_score || 0 },
+                          { label: '节奏把控', value: analysis_data.pacing_score || 0 },
+                          { label: '吸引力', value: analysis_data.engagement_score || 0 },
+                          { label: '连贯性', value: analysis_data.coherence_score || 0 },
+                        ];
+
+                    // 根据数量动态决定每列宽度（最多一行4个，多了就换行）
+                    const colSpan = scoreItems.length >= 4
+                      ? (isMobile ? 12 : Math.floor(24 / Math.min(scoreItems.length, 4)))
+                      : (isMobile ? 12 : Math.floor(24 / Math.max(scoreItems.length, 2)));
+
+                    return (
+                      <Row gutter={isMobile ? 8 : 16}>
+                        {scoreItems.map((item, idx) => {
+                          // 评分越高颜色越绿（仅给"整体质量"或"overall"加 success 色）
+                          const isOverall = /整体|overall/i.test(item.label);
+                          return (
+                            <Col span={colSpan} key={`score-${idx}`}>
+                              <Statistic
+                                title={item.label}
+                                value={Number(item.value.toFixed(1))}
+                                suffix="/ 10"
+                                precision={1}
+                                valueStyle={isOverall ? { color: 'var(--color-success)' } : undefined}
+                              />
+                            </Col>
+                          );
+                        })}
+                      </Row>
+                    );
+                  })()}
                 </Card>
 
                 {analysis_data.analysis_report && (
