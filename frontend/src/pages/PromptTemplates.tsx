@@ -25,7 +25,8 @@ import {
   UploadOutlined,
   CheckCircleOutlined,
   FileSearchOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  EyeOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 import { promptTemplateCardStyles, promptTemplateCardHoverHandlers, promptTemplateGridConfig } from '../components/CardStyles';
@@ -61,6 +62,9 @@ export default function PromptTemplates() {
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [systemDefaultVisible, setSystemDefaultVisible] = useState(false);
+  const [systemDefaultContent, setSystemDefaultContent] = useState<string>('');
+  const [systemDefaultLoading, setSystemDefaultLoading] = useState(false);
 
   const isMobile = window.innerWidth <= 768;
 
@@ -146,6 +150,35 @@ export default function PromptTemplates() {
         }
       }
     });
+  };
+
+  // 查看系统默认内容
+  const handleViewSystemDefault = async (templateKey: string, _templateName: string) => {
+    try {
+      setSystemDefaultLoading(true);
+      const response = await axios.get('/api/prompt-templates/system-defaults');
+      const templates = response.data.templates || [];
+      const found = templates.find((t: { template_key: string }) => t.template_key === templateKey);
+      if (found) {
+        setSystemDefaultContent(found.content || '');
+        setSystemDefaultVisible(true);
+      } else {
+        message.warning('未找到对应的系统默认模板');
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      message.error(err.response?.data?.detail || '加载系统默认失败');
+    } finally {
+      setSystemDefaultLoading(false);
+    }
+  };
+
+  // 复制系统默认到编辑器（一键采纳最新版）
+  const handleAdoptSystemDefault = async () => {
+    if (!editingTemplate || !systemDefaultContent) return;
+    setEditingTemplate(prev => prev ? { ...prev, template_content: systemDefaultContent } : null);
+    setSystemDefaultVisible(false);
+    message.success('已将最新系统默认内容填入编辑器，请保存以生效');
   };
 
   // 切换启用状态
@@ -483,8 +516,47 @@ export default function PromptTemplates() {
                           模板键: {template.template_key}
                         </Text>
 
+                        {/* 参数列表 */}
+                        {template.parameters && (() => {
+                          let params: string[] = [];
+                          try {
+                            const parsed = typeof template.parameters === 'string'
+                              ? JSON.parse(template.parameters)
+                              : template.parameters;
+                            if (Array.isArray(parsed)) {
+                              params = parsed.filter((p: unknown) => typeof p === 'string');
+                            }
+                          } catch {
+                            // ignore parse errors
+                          }
+                          if (params.length === 0) return null;
+                          return (
+                            <div style={{ marginBottom: 16 }}>
+                              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                                可用变量（{params.length}）:
+                              </Text>
+                              <Space wrap size={[4, 4]}>
+                                {params.map((p: string) => (
+                                  <Tag
+                                    key={p}
+                                    style={{
+                                      fontSize: 11,
+                                      margin: 0,
+                                      fontFamily: 'monospace',
+                                      background: token.colorFillTertiary,
+                                      borderColor: 'transparent'
+                                    }}
+                                  >
+                                    {`{${p}}`}
+                                  </Tag>
+                                ))}
+                              </Space>
+                            </div>
+                          );
+                        })()}
+
                         {/* 操作按钮 */}
-                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <Space style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                           <Button
                             type="primary"
                             icon={<EditOutlined />}
@@ -493,6 +565,15 @@ export default function PromptTemplates() {
                             style={{ borderRadius: 6 }}
                           >
                             编辑
+                          </Button>
+                          <Button
+                            icon={<EyeOutlined />}
+                            onClick={() => handleViewSystemDefault(template.template_key, template.template_name)}
+                            size={isMobile ? 'small' : 'middle'}
+                            loading={systemDefaultLoading}
+                            style={{ borderRadius: 6 }}
+                          >
+                            查看默认
                           </Button>
                           <Button
                             icon={<ReloadOutlined />}
@@ -554,7 +635,18 @@ export default function PromptTemplates() {
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>模板内容</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label style={{ fontWeight: 500 }}>模板内容</label>
+              <Button
+                size="small"
+                type="link"
+                icon={<EyeOutlined />}
+                onClick={() => editingTemplate && handleViewSystemDefault(editingTemplate.template_key, editingTemplate.template_name)}
+                loading={systemDefaultLoading}
+              >
+                查看最新默认
+              </Button>
+            </div>
             <TextArea
               value={editingTemplate?.template_content || ''}
               onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, template_content: e.target.value } : null)}
@@ -564,6 +656,45 @@ export default function PromptTemplates() {
             />
           </div>
 
+          {/* 参数列表（编辑模式） */}
+          {editingTemplate?.parameters && (() => {
+            let params: string[] = [];
+            try {
+              const parsed = typeof editingTemplate.parameters === 'string'
+                ? JSON.parse(editingTemplate.parameters)
+                : editingTemplate.parameters;
+              if (Array.isArray(parsed)) {
+                params = parsed.filter((p: unknown) => typeof p === 'string');
+              }
+            } catch {
+              // ignore
+            }
+            if (params.length === 0) return null;
+            return (
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
+                  可用变量（{params.length} 个）
+                </label>
+                <Space wrap size={[4, 4]}>
+                  {params.map((p: string) => (
+                    <Tag
+                      key={p}
+                      style={{
+                        fontSize: 11,
+                        margin: 0,
+                        fontFamily: 'monospace',
+                        background: token.colorFillTertiary,
+                        borderColor: 'transparent'
+                      }}
+                    >
+                      {`{${p}}`}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            );
+          })()}
+
           <Alert
             message="提示：使用 {variable_name} 格式表示变量占位符"
             type="info"
@@ -571,6 +702,48 @@ export default function PromptTemplates() {
             style={{ borderRadius: 8 }}
           />
         </Space>
+      </Modal>
+
+      {/* 系统默认内容查看对话框 */}
+      <Modal
+        title="系统默认模板内容"
+        open={systemDefaultVisible}
+        onCancel={() => setSystemDefaultVisible(false)}
+        footer={
+          <Space>
+            <Button onClick={() => setSystemDefaultVisible(false)}>关闭</Button>
+            <Button
+              type="primary"
+              onClick={handleAdoptSystemDefault}
+              disabled={!editorVisible}
+            >
+              采纳为我的版本
+            </Button>
+          </Space>
+        }
+        width={isMobile ? '100%' : 900}
+        centered={!isMobile}
+        style={isMobile ? { top: 0, paddingBottom: 0, maxWidth: '100vw' } : undefined}
+        styles={isMobile ? {
+          body: {
+            maxHeight: 'calc(100vh - 110px)',
+            overflowY: 'auto',
+            padding: '16px'
+          }
+        } : undefined}
+      >
+        <Alert
+          message="这是当前系统默认的提示词模板内容（包含最新评分维度与改进）。你可以对照参考，或点击「采纳为我的版本」一键更新你的自定义副本。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16, borderRadius: 8 }}
+        />
+        <TextArea
+          value={systemDefaultContent}
+          readOnly
+          rows={isMobile ? 18 : 24}
+          style={{ fontFamily: 'monospace', fontSize: '12px' }}
+        />
       </Modal>
     </div>
     </>

@@ -11,7 +11,7 @@ from app.models.project import Project
 from app.models.outline import Outline
 from app.models.character import Character
 from app.models.career import Career, CharacterCareer
-from app.models.memory import StoryMemory
+from app.models.memory import StoryMemory, PlotAnalysis
 from app.models.foreshadow import Foreshadow
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember
 from app.logger import get_logger
@@ -153,6 +153,9 @@ class OneToManyContext:
     relevant_memories: Optional[str] = None  # 始终启用（相关度>0.6）
     foreshadow_reminders: Optional[str] = None
     
+    # === P3-评分反馈（可选）===
+    quality_trends: Optional[str] = None  # 前几章的评分趋势与改进建议
+    
     # === 元信息 ===
     context_stats: Dict[str, Any] = field(default_factory=dict)
     
@@ -162,7 +165,7 @@ class OneToManyContext:
         for field_name in ['chapter_outline', 'recent_chapters_context', 'continuation_point',
                           'chapter_characters', 'chapter_careers',
                           'relevant_memories', 'foreshadow_reminders',
-                          'previous_chapter_summary']:
+                          'previous_chapter_summary', 'quality_trends']:
             value = getattr(self, field_name, None)
             if value:
                 total += len(value)
@@ -206,6 +209,9 @@ class OneToOneContext:
     foreshadow_reminders: Optional[str] = None
     relevant_memories: Optional[str] = None  # 相关度>0.6
     
+    # === P3-评分反馈（可选）===
+    quality_trends: Optional[str] = None  # 前几章的评分趋势与改进建议
+    
     # === 元信息 ===
     context_stats: Dict[str, Any] = field(default_factory=dict)
     
@@ -214,11 +220,92 @@ class OneToOneContext:
         total = 0
         for field_name in ['chapter_outline', 'continuation_point', 'previous_chapter_summary',
                           'chapter_characters', 'chapter_careers', 'foreshadow_reminders',
-                          'relevant_memories']:
+                          'relevant_memories', 'quality_trends']:
             value = getattr(self, field_name, None)
             if value:
                 total += len(value)
         return total
+
+
+# ==================== 评分趋势构建（共享） ====================
+
+async def _build_quality_trends(
+    project_id: str,
+    current_chapter_number: int,
+    db: AsyncSession,
+    lookback: int = 5
+) -> Optional[str]:
+    """
+    构建前几章的评分趋势，用于反哺生成。
+    
+    从 PlotAnalysis 表中获取最近 lookback 章的分析结果，
+    提取总体评分、分项评分和改进建议，形成趋势摘要供生成 prompt 参考。
+    """
+    try:
+        result = await db.execute(
+            select(PlotAnalysis, Chapter.chapter_number)
+            .join(Chapter, PlotAnalysis.chapter_id == Chapter.id)
+            .where(PlotAnalysis.project_id == project_id)
+            .where(Chapter.chapter_number < current_chapter_number)
+            .where(Chapter.chapter_number >= max(1, current_chapter_number - lookback))
+            .order_by(Chapter.chapter_number.asc())
+        )
+        rows = result.all()
+        
+        if not rows:
+            return None
+        
+        lines = ["【📊 最近章节评分趋势】"]
+        
+        scores = []
+        pacing_scores = []
+        engagement_scores = []
+        coherence_scores = []
+        suggestions_list = []
+        
+        for a, ch_num in rows:
+            overall = a.overall_quality_score
+            if overall:
+                scores.append((ch_num, overall))
+            if a.pacing_score:
+                pacing_scores.append((ch_num, a.pacing_score))
+            if a.engagement_score:
+                engagement_scores.append((ch_num, a.engagement_score))
+            if a.coherence_score:
+                coherence_scores.append((ch_num, a.coherence_score))
+            if a.suggestions and isinstance(a.suggestions, list):
+                suggestions_list.extend(a.suggestions)
+        
+        if scores:
+            score_str = " → ".join(f"第{n}章:{s:.1f}" for n, s in scores)
+            avg = sum(s for _, s in scores) / len(scores)
+            lines.append(f"综合评分: {score_str}（均分{avg:.1f}）")
+        
+        if pacing_scores:
+            p_str = " → ".join(f"{s:.1f}" for _, s in pacing_scores)
+            avg_p = sum(s for _, s in pacing_scores) / len(pacing_scores)
+            lines.append(f"节奏把控: {p_str}（均分{avg_p:.1f}）")
+        if engagement_scores:
+            e_str = " → ".join(f"{s:.1f}" for _, s in engagement_scores)
+            avg_e = sum(s for _, s in engagement_scores) / len(engagement_scores)
+            lines.append(f"吸引力: {e_str}（均分{avg_e:.1f}）")
+        if coherence_scores:
+            c_str = " → ".join(f"{s:.1f}" for _, s in coherence_scores)
+            avg_c = sum(s for _, s in coherence_scores) / len(coherence_scores)
+            lines.append(f"连贯性: {c_str}（均分{avg_c:.1f}）")
+        
+        if suggestions_list:
+            unique_suggestions = list(dict.fromkeys(suggestions_list))[:3]
+            lines.append("需要改进: " + "；".join(unique_suggestions))
+        
+        if len(lines) <= 1:
+            return None
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        logger.error(f"❌ 构建评分趋势失败: {str(e)}")
+        return None
 
 
 # ==================== 1-N模式上下文构建器 ====================
@@ -355,6 +442,14 @@ class OneToManyContextBuilder:
             if context.foreshadow_reminders:
                 logger.info(f"  ✅ 伏笔提醒: {len(context.foreshadow_reminders)}字符")
         
+        # === P3-评分反馈（前几章的评分趋势）===
+        if chapter_number > 1:
+            context.quality_trends = await _build_quality_trends(
+                project.id, chapter_number, db
+            )
+            if context.quality_trends:
+                logger.info(f"  ✅ 评分趋势: {len(context.quality_trends)}字符")
+        
         # === 统计信息 ===
         context.context_stats = {
             "mode": "one-to-many",
@@ -366,6 +461,7 @@ class OneToManyContextBuilder:
             "recent_context_length": len(context.recent_chapters_context or ""),
             "memories_length": len(context.relevant_memories or ""),
             "foreshadow_length": len(context.foreshadow_reminders or ""),
+            "quality_trends_length": len(context.quality_trends or ""),
             "total_length": context.get_total_context_length()
         }
         
@@ -1013,6 +1109,7 @@ class OneToManyContextBuilder:
             logger.error(f"❌ 获取伏笔提醒失败: {str(e)}")
             return None
     
+
     async def _build_story_skeleton(
         self,
         project_id: str,
@@ -1281,6 +1378,14 @@ class OneToOneContextBuilder:
             context.relevant_memories = None
             logger.info(f"  ⚠️ P2-相关记忆: 无大纲内容或记忆服务不可用")
         
+        # === P3-评分反馈（前几章的评分趋势）===
+        if chapter_number > 1:
+            context.quality_trends = await _build_quality_trends(
+                project.id, chapter_number, db
+            )
+            if context.quality_trends:
+                logger.info(f"  ✅ P3-评分趋势: {len(context.quality_trends)}字符")
+        
         # === 统计信息 ===
         context.context_stats = {
             "mode": "one-to-one",
@@ -1293,6 +1398,7 @@ class OneToOneContextBuilder:
             "careers_length": len(context.chapter_careers or ""),
             "foreshadow_length": len(context.foreshadow_reminders or ""),
             "memories_length": len(context.relevant_memories or ""),
+            "quality_trends_length": len(context.quality_trends or ""),
             "total_length": context.get_total_context_length()
         }
         

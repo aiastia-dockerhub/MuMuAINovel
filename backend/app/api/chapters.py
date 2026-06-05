@@ -1552,7 +1552,8 @@ async def generate_chapter_content_stream(
                             characters_info=chapter_context.chapter_characters or '暂无角色信息',
                             chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                             foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
                         )
                         logger.debug(f"创建第{current_chapter.chapter_number}章提示词完成: prompt_length={len(base_prompt)}")
                     else:
@@ -1570,7 +1571,8 @@ async def generate_chapter_content_stream(
                             characters_info=chapter_context.chapter_characters or '暂无角色信息',
                             chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                             foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
                         )
                         logger.debug(f"创建第一章提示词完成: prompt_length={len(base_prompt)}")
                 else:
@@ -1619,7 +1621,8 @@ async def generate_chapter_content_stream(
                             characters_info=chapter_context.chapter_characters or '暂无角色信息',
                             chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                             foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
                         )
                         logger.debug(f"创建第一章提示词完成: prompt_length={len(base_prompt)}")
                 
@@ -2194,7 +2197,8 @@ async def _run_chapter_generation_bg(
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
             )
         else:
             template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE", user_id, db)
@@ -2210,7 +2214,8 @@ async def _run_chapter_generation_bg(
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
             )
     else:
         if chapter_context.continuation_point:
@@ -2247,7 +2252,8 @@ async def _run_chapter_generation_bg(
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
             )
 
     # 应用写作风格
@@ -3733,6 +3739,7 @@ async def generate_single_chapter_for_batch(
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
                 relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or '',
                 previous_chapter_summary=chapter_context.previous_chapter_summary or ''
             )
         else:
@@ -3750,7 +3757,8 @@ async def generate_single_chapter_for_batch(
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
             )
     else:
         # 1-n模式：使用 context_builder 构建的结果，与单章生成保持一致
@@ -3797,7 +3805,8 @@ async def generate_single_chapter_for_batch(
                 characters_info=chapter_context.chapter_characters or '暂无角色信息',
                 chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
                 foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆',
+                            quality_trends=chapter_context.quality_trends or ''
             )
     
     # 应用写作风格

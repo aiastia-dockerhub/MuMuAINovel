@@ -612,6 +612,10 @@ class PromptService:
 {relevant_memories}
 </memory>
 
+<quality_feedback priority="P3">
+{quality_trends}
+</quality_feedback>
+
 <constraints>
 【必须遵守】
 ✅ 严格按照大纲推进情节
@@ -675,6 +679,10 @@ class PromptService:
 【相关记忆】
 {relevant_memories}
 </memory>
+
+<quality_feedback priority="P3">
+{quality_trends}
+</quality_feedback>
 
 <constraints>
 【必须遵守】
@@ -746,6 +754,10 @@ class PromptService:
 【相关记忆】
 {relevant_memories}
 </memory>
+
+<quality_feedback priority="P3">
+{quality_trends}
+</quality_feedback>
 
 <constraints>
 【必须遵守】
@@ -835,6 +847,10 @@ class PromptService:
 【相关记忆 - 参考】
 {relevant_memories}
 </memory>
+
+<quality_feedback priority="P3">
+{quality_trends}
+</quality_feedback>
 
 <constraints>
 【必须遵守】
