@@ -967,7 +967,9 @@ async def analyze_chapter_background(
             word_count=chapter.word_count or len(chapter.content),
             existing_foreshadows=existing_foreshadows,
             on_retry=on_retry_callback,
-            characters_info=characters_info
+            characters_info=characters_info,
+            user_id=user_id,        # 传入用户ID以加载自定义提示词模板
+            db=db_session           # 传入数据库会话
         )
         
         if not analysis_result:
