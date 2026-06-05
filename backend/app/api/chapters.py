@@ -1390,6 +1390,7 @@ async def generate_chapter_content_stream(
         break
     
     async def event_generator():
+        nonlocal skill_key  # 声明使用外层作用域的 skill_key，避免 UnboundLocalError
         # 在生成器内部创建独立的数据库会话
         db_session = None
         db_committed = False
