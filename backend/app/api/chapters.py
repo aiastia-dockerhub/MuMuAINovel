@@ -2460,19 +2460,18 @@ def _build_analysis_task_status_payload(
     }
 
 
-@router.post("/{chapter_id}/generate-background-legacy", summary="AI创作章节内容（后台任务，遗留重复实现）")
-async def generate_chapter_content_background_legacy(
+async def _get_analysis_task_status_impl(
     chapter_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db)
-):
+    db: AsyncSession
+) -> dict:
     """
-    查询指定章节的最新分析任务状态
-    
+    查询指定章节最新分析任务状态（内部共享实现）
+
     自动恢复机制：
-    - 如果任务状态为running且超过1分钟未更新，自动标记为failed
-    - 如果任务状态为pending且超过2分钟未启动，自动标记为failed
-    
+    - 如果任务状态为running且超过3分钟未更新（重试中5分钟），自动标记为failed
+    - 如果任务状态为pending且超过3分钟未启动，自动标记为failed
+
     返回:
     - has_task: 是否存在分析任务
     - task_id: 任务ID（如果存在）
@@ -2482,24 +2481,24 @@ async def generate_chapter_content_background_legacy(
     - auto_recovered: 是否被自动恢复
     - created_at: 创建时间
     - completed_at: 完成时间
-    
+
     注意：当章节不存在或无权访问时返回404，当没有分析任务时返回has_task=false
     """
     from datetime import timedelta
-    
+
     # 先获取章节以验证存在性和权限
     chapter_result = await db.execute(
         select(Chapter).where(Chapter.id == chapter_id)
     )
     chapter = chapter_result.scalar_one_or_none()
-    
+
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
-    
+
     # 验证用户权限
     user_id = getattr(request.state, 'user_id', None)
     await verify_project_access(chapter.project_id, user_id, db)
-    
+
     # 获取该章节最新的分析任务
     result = await db.execute(
         select(AnalysisTask)
@@ -2508,14 +2507,14 @@ async def generate_chapter_content_background_legacy(
         .limit(1)
     )
     task = result.scalar_one_or_none()
-    
+
     if not task:
         # 返回无任务状态，而不是抛出404错误
         return _build_analysis_task_status_payload(chapter_id, None)
-    
+
     auto_recovered = False
     current_time = datetime.now()
-    
+
     # 自动恢复卡住的任务
     # 注意：后端分析有3次重试机制，每次重试会重置 started_at
     # 所以超时时间需要足够长以支持完整的重试周期（约5分钟）
@@ -2524,7 +2523,7 @@ async def generate_chapter_content_background_legacy(
         is_retrying = task.error_message and '重试' in task.error_message
         # 如果正在重试，给予更长的超时时间（5分钟），否则3分钟
         timeout_minutes = 5 if is_retrying else 3
-        
+
         # 如果任务在running状态超过超时时间，标记为失败
         if task.started_at and (current_time - task.started_at) > timedelta(minutes=timeout_minutes):
             task.status = 'failed'
@@ -2535,7 +2534,7 @@ async def generate_chapter_content_background_legacy(
             await db.commit()
             await db.refresh(task)
             logger.warning(f"🔄 自动恢复卡住的任务: {task.id}, 章节: {chapter_id}")
-    
+
     elif task.status == 'pending':
         # 如果任务在pending状态超过3分钟仍未开始，标记为失败
         if task.created_at and (current_time - task.created_at) > timedelta(minutes=3):
@@ -2547,8 +2546,28 @@ async def generate_chapter_content_background_legacy(
             await db.commit()
             await db.refresh(task)
             logger.warning(f"🔄 自动恢复未启动的任务: {task.id}, 章节: {chapter_id}")
-    
+
     return _build_analysis_task_status_payload(chapter_id, task, auto_recovered)
+
+
+@router.get("/{chapter_id}/analysis/status", summary="获取章节分析任务状态")
+async def get_chapter_analysis_status(
+    chapter_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取指定章节的分析任务状态（前端主要调用此接口）"""
+    return await _get_analysis_task_status_impl(chapter_id, request, db)
+
+
+@router.post("/{chapter_id}/generate-background-legacy", summary="AI创作章节内容（后台任务，遗留重复实现）")
+async def generate_chapter_content_background_legacy(
+    chapter_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """兼容旧前端的别名路由，实际功能是查询分析任务状态，请使用 GET /analysis/status"""
+    return await _get_analysis_task_status_impl(chapter_id, request, db)
 
 
 @router.post("/project/{project_id}/analysis/statuses", summary="批量查询章节分析任务状态", response_model=BatchAnalysisStatusResponse)
