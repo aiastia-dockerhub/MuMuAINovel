@@ -1545,6 +1545,204 @@ class ForeshadowService:
             return {"checked_count": 0, "planted_count": 0, "planted_ids": [], "error": str(e)}
 
 
+    async def plan_foreshadows_for_project(
+        self,
+        db: AsyncSession,
+        project_id: str,
+        ai_service: Any,
+        user_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        根据项目大纲AI规划伏笔的埋入和回收方案
+        
+        Args:
+            db: 数据库会话
+            project_id: 项目ID
+            ai_service: AI服务实例
+            user_id: 用户ID（用于获取自定义提示词）
+        
+        Returns:
+            规划结果统计
+        """
+        try:
+            from app.services.prompt_service import PromptService, prompt_service
+            from app.services.json_helper import loads_json
+            from app.models.outline import Outline
+            from app.models.character import Character
+            
+            # 1. 获取项目信息
+            project = await db.get(Project, project_id)
+            if not project:
+                return {"success": False, "error": "项目不存在"}
+            
+            # 2. 获取所有大纲
+            outlines_result = await db.execute(
+                select(Outline)
+                .where(Outline.project_id == project_id)
+                .order_by(Outline.order_index)
+            )
+            outlines = outlines_result.scalars().all()
+            
+            # 格式化大纲摘要
+            outlines_lines = []
+            for o in outlines:
+                # 尝试从 structure 中提取摘要
+                structure = o.structure if isinstance(o.structure, dict) else {}
+                summary = structure.get('summary', o.content[:200] if o.content else '')
+                outlines_lines.append(
+                    f"第{o.order_index}节：{o.title}\n摘要：{summary[:300]}"
+                )
+            outlines_summary = "\n\n".join(outlines_lines) if outlines_lines else "（暂无大纲）"
+            
+            # 3. 获取角色信息
+            chars_result = await db.execute(
+                select(Character)
+                .where(Character.project_id == project_id)
+                .order_by(Character.created_at)
+            )
+            characters = chars_result.scalars().all()
+            
+            char_lines = []
+            for c in characters:
+                parts = [f"姓名：{c.name}"]
+                if c.age:
+                    parts.append(f"年龄：{c.age}")
+                if c.personality:
+                    parts.append(f"性格：{c.personality[:100]}")
+                if c.background:
+                    parts.append(f"背景：{c.background[:100]}")
+                char_lines.append("，".join(parts))
+            characters_info = "\n".join(char_lines) if char_lines else "（暂无角色信息）"
+            
+            # 4. 获取已有伏笔
+            existing_result = await db.execute(
+                select(Foreshadow)
+                .where(
+                    Foreshadow.project_id == project_id,
+                    Foreshadow.status != 'abandoned'
+                )
+                .order_by(Foreshadow.created_at)
+            )
+            existing_foreshadows = existing_result.scalars().all()
+            
+            existing_lines = []
+            for fs in existing_foreshadows:
+                existing_lines.append(f"- {fs.title}（状态：{fs.status}，类别：{fs.category or '未分类'}）")
+            existing_foreshadows_text = "\n".join(existing_lines) if existing_lines else "（暂无已有伏笔）"
+            
+            # 5. 获取总章节数
+            total_chapters = len(outlines)
+            
+            # 6. 从项目世界观中提取信息
+            worldview = project.world_view if isinstance(project.world_view, dict) else {}
+            time_period = worldview.get('time_period', '未设定')
+            location = worldview.get('location', '未设定')
+            atmosphere = worldview.get('atmosphere', '未设定')
+            rules = worldview.get('rules', '未设定')
+            
+            # 7. 获取提示词模板
+            try:
+                if user_id and db:
+                    template = await PromptService.get_template("FORESHADOW_PLANNING", user_id, db)
+                else:
+                    template = PromptService.FORESHADOW_PLANNING
+            except Exception as e:
+                logger.warning(f"⚠️ 获取伏笔规划提示词失败，使用默认: {e}")
+                template = PromptService.FORESHADOW_PLANNING
+            
+            # 8. 格式化提示词
+            prompt = PromptService.format_prompt(
+                template,
+                title=project.title or "未命名小说",
+                genre=project.genre or "未设定",
+                theme=project.theme or "未设定",
+                total_chapters=total_chapters,
+                time_period=time_period,
+                location=location,
+                atmosphere=atmosphere,
+                rules=rules,
+                characters_info=characters_info,
+                outlines_summary=outlines_summary,
+                existing_foreshadows=existing_foreshadows_text
+            )
+            
+            # 9. 调用AI生成伏笔规划
+            logger.info(f"🔮 开始为项目《{project.title}》规划伏笔...")
+            accumulated_text = ""
+            
+            async for chunk in ai_service.generate_text_stream(
+                prompt=prompt,
+                temperature=0.4
+            ):
+                accumulated_text += chunk
+            
+            if not accumulated_text or len(accumulated_text.strip()) < 20:
+                return {"success": False, "error": "AI返回内容为空"}
+            
+            # 10. 解析JSON结果
+            cleaned = ai_service._clean_json_response(accumulated_text)
+            foreshadow_plans = loads_json(cleaned)
+            
+            if not isinstance(foreshadow_plans, list):
+                return {"success": False, "error": "AI返回格式错误，预期为数组"}
+            
+            # 11. 创建伏笔记录
+            created_count = 0
+            created_foreshadows = []
+            
+            for plan in foreshadow_plans:
+                try:
+                    fs = Foreshadow(
+                        id=str(uuid.uuid4()),
+                        project_id=project_id,
+                        title=plan.get('title', '未命名伏笔'),
+                        content=plan.get('content', ''),
+                        category=plan.get('category', 'mystery'),
+                        status='pending',
+                        source_type='planned',
+                        is_long_term=plan.get('is_long_term', False),
+                        strength=plan.get('strength', 5),
+                        subtlety=plan.get('subtlety', 5),
+                        importance=min(plan.get('strength', 5) / 10.0, 1.0),
+                        plant_chapter_number=plan.get('plant_chapter_number'),
+                        target_resolve_chapter_number=plan.get('estimated_resolve_chapter'),
+                        notes=plan.get('purpose', ''),
+                        hint_text=plan.get('plant_method', ''),
+                        resolution_notes=plan.get('resolve_method', ''),
+                        related_characters=plan.get('related_characters', []),
+                        auto_remind=True,
+                        include_in_context=True,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
+                    )
+                    db.add(fs)
+                    created_count += 1
+                    created_foreshadows.append({
+                        "title": fs.title,
+                        "plant_chapter": fs.plant_chapter_number,
+                        "resolve_chapter": fs.target_resolve_chapter_number,
+                        "category": fs.category
+                    })
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ 创建伏笔失败: {e}")
+                    continue
+            
+            await db.commit()
+            
+            logger.info(f"✅ 伏笔规划完成: 为《{project.title}》创建了{created_count}个伏笔")
+            
+            return {
+                "success": True,
+                "created_count": created_count,
+                "foreshadows": created_foreshadows
+            }
+            
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"❌ 伏笔规划失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     def _match_foreshadow_by_content(
         self,
         resolved_fs_data: Dict[str, Any],

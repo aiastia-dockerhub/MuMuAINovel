@@ -379,3 +379,42 @@ async def sync_foreshadows_from_analysis(
     except Exception as e:
         logger.error(f"❌ 同步伏笔失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"同步伏笔失败: {str(e)}")
+
+
+@router.post("/projects/{project_id}/plan")
+async def plan_foreshadows_for_project(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    AI规划伏笔
+
+    根据项目大纲，AI自动规划伏笔的埋入和回收方案，
+    创建 pending 状态的伏笔记录，供后续章节生成时使用
+    """
+    try:
+        user_id = getattr(request.state, 'user_id', None)
+        await verify_project_access(project_id, user_id, db)
+
+        # 获取AI服务
+        from app.services.ai_service import AIService
+        ai_service = AIService()
+
+        result = await foreshadow_service.plan_foreshadows_for_project(
+            db=db,
+            project_id=project_id,
+            ai_service=ai_service,
+            user_id=user_id
+        )
+
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "伏笔规划失败"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 伏笔规划API失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"伏笔规划失败: {str(e)}")

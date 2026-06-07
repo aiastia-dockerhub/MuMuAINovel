@@ -1417,6 +1417,141 @@ class PromptService:
 ❌ suggestions 返回带编号对象、content对象、explanation对象等任何非字符串元素
 </constraints>"""
 
+    # 伏笔规划提示词（基于大纲提前规划伏笔）
+    FORESHADOW_PLANNING = """<system>
+你是专业的小说编剧和悬念设计师，擅长为长篇小说设计精妙的伏笔系统。
+</system>
+
+<task>
+【规划任务】
+根据小说《{title}》的大纲，系统性地规划伏笔的埋入和回收方案。
+
+【核心原则】
+- 伏笔必须服务于故事主线，不能为了伏笔而伏笔
+- 每个伏笔都要有明确的"埋入点"和"预期回收点"
+- 伏笔类型要多样化，避免全是单一类型
+- 长线伏笔（跨10章以上）和短线伏笔合理搭配
+- 伏笔之间可以形成网络，互相呼应
+</task>
+
+<project priority="P0">
+【项目信息】
+书名：{title}
+类型：{genre}
+主题：{theme}
+总章节数：{total_chapters}
+</project>
+
+<worldview priority="P1">
+【世界观】
+时间背景：{time_period}
+地理位置：{location}
+氛围基调：{atmosphere}
+世界规则：{rules}
+</worldview>
+
+<characters priority="P1">
+【角色信息】
+{characters_info}
+</characters>
+
+<outlines priority="P0">
+【章节大纲】
+{outlines_summary}
+</outlines>
+
+<existing_foreshadows priority="P1">
+【已有伏笔】
+{existing_foreshadows}
+</existing_foreshadows>
+
+<planning_framework priority="P0">
+【规划维度】
+
+**1. 核心悬念线（1-3条）**
+贯穿全书的大型悬念，通常在前几章埋下，在高潮或结局回收：
+- 身世之谜：主角或关键角色的隐藏身份/来历
+- 终极秘密：故事世界的隐藏真相
+- 命运预言：预示未来走向的线索
+
+**2. 角色关联伏笔（每条2-5章跨度）**
+与角色发展紧密相关的伏笔：
+- 性格伏笔：角色的某个习惯/特征暗示更深层的背景
+- 关系伏笔：角色之间的微妙互动暗示未来变化
+- 命运伏笔：角色的某个决定或经历的因果链条
+
+**3. 世界观伏笔（中长线）**
+与世界观设定相关的伏笔：
+- 规则伏笔：世界规则的某个细节暗示重大真相
+- 遗迹伏笔：某个物品/地点暗示过去的重大事件
+- 势力伏笔：组织/势力之间的暗流涌动
+
+**4. 情节钩子伏笔（短线，2-4章）**
+提升阅读体验的短平快伏笔：
+- 悬念钩子：制造即时好奇
+- 反转铺垫：为即将到来的反转做准备
+- 危机预兆：暗示即将到来的危险
+
+【伏笔设计要求】
+- 每个伏笔必须指定 plant_chapter（埋入章节）和 estimated_resolve_chapter（预期回收章节）
+- 伏笔的埋入必须自然融入剧情，不能生硬
+- 优先利用大纲中已有的情节点作为伏载体
+- 考虑伏笔之间的关联性和层次感
+</planning_framework>
+
+<output priority="P0">
+【输出格式】
+返回纯JSON数组，每个对象为一个伏笔规划：
+
+[
+  {{
+    "title": "伏笔简洁标题（10-20字）",
+    "content": "伏笔的详细内容描述，包括埋入方式和预期回收方式",
+    "category": "分类（identity=身世/mystery=悬念/item=物品/relationship=关系/event=事件/ability=能力/prophecy=预言/organization=组织）",
+    "plant_chapter_number": 1,
+    "estimated_resolve_chapter": 15,
+    "is_long_term": true,
+    "strength": 8,
+    "subtlety": 7,
+    "related_characters": ["角色A", "角色B"],
+    "plant_method": "具体说明如何在指定章节中自然埋入这个伏笔",
+    "resolve_method": "具体说明预期如何回收这个伏笔",
+    "purpose": "这个伏笔在故事中的作用和意义"
+  }}
+]
+
+【字段说明】
+- title：简洁有力的标题
+- content：伏笔的完整描述
+- category：分类标签
+- plant_chapter_number：埋入章节号（从1开始）
+- estimated_resolve_chapter：预期回收章节号
+- is_long_term：跨10章以上为true
+- strength：对读者的吸引力（1-10）
+- subtlety：隐蔽程度（1-10，越高越隐蔽）
+- related_characters：涉及的角色列表
+- plant_method：埋入手法说明（指导生成时使用）
+- resolve_method：回收手法说明
+- purpose：伏笔的叙事目的
+</output>
+
+<constraints>
+【必须遵守】
+✅ 伏笔数量合理：根据总章节数规划，一般每3-5章需要1-2个伏笔
+✅ 分布均匀：伏笔的埋入和回收在时间线上分布合理
+✅ 类型多样：不同类型的伏笔搭配使用
+✅ 自然融合：伏笔必须能自然融入大纲中的情节
+✅ 前后呼应：伏笔之间形成有机网络
+✅ 可操作性：plant_method 和 resolve_method 要具体可执行
+
+【禁止事项】
+❌ 规划与大纲情节脱节的伏笔
+❌ 所有伏笔都集中在前几章或后几章
+❌ 伏笔数量过多导致故事臃肿
+❌ 输出markdown或代码块标记
+❌ 忽略已有的伏笔规划
+</constraints>"""
+
     # 大纲单批次展开提示词 V2（RTCO框架）
     OUTLINE_EXPAND_SINGLE = """<system>
 你是专业的小说情节架构师，擅长将大纲节点展开为详细章节规划。
@@ -3059,6 +3194,13 @@ class PromptService:
                 "category": "情节分析",
                 "description": "深度分析章节的剧情、钩子、伏笔等",
                 "parameters": ["chapter_number", "title", "content", "word_count"]
+            },
+            "FORESHADOW_PLANNING": {
+                "name": "伏笔规划",
+                "category": "伏笔规划",
+                "description": "根据大纲提前规划伏笔的埋入和回收方案",
+                "parameters": ["title", "genre", "theme", "total_chapters", "time_period", "location", 
+                             "atmosphere", "rules", "characters_info", "outlines_summary", "existing_foreshadows"]
             },
             "OUTLINE_EXPAND_SINGLE": {
                 "name": "大纲单批次展开",
